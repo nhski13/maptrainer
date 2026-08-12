@@ -105,7 +105,7 @@ function renderTopbar(active: 'train' | 'stats' | null): HTMLElement {
   const bar = el(`
     <div class="topbar">
       <div class="logo">Map<em>Trainer</em></div>
-      <div class="streak-chip">🔥 ${streak.current}-day streak · best ${streak.best}</div>
+      <div class="streak-chip">🔥 <span class="streak-long">${streak.current}-day streak · best ${streak.best}</span><span class="streak-short">${streak.current}d · best ${streak.best}</span></div>
       <div class="spacer"></div>
       <button class="nav-btn mute-btn" title="Toggle sound">${isMuted() ? '🔇' : '🔊'}</button>
       <button class="nav-btn ${active === 'train' ? 'active' : ''}" data-nav="train">Train</button>

@@ -93,6 +93,12 @@ button {
   border: 1px solid var(--panel-border);
   border-radius: 999px;
   padding: 4px 12px;
+  white-space: nowrap;
+  flex: none;
+}
+
+.streak-short {
+  display: none;
 }
 
 .topbar .spacer {
@@ -580,5 +586,32 @@ table.weak-table {
 
   .screen {
     padding: 18px 14px 32px;
+  }
+
+  .topbar {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .logo {
+    font-size: 16px;
+  }
+
+  .streak-chip {
+    font-size: 12px;
+    padding: 4px 10px;
+  }
+
+  .streak-long {
+    display: none;
+  }
+
+  .streak-short {
+    display: inline;
+  }
+
+  .nav-btn {
+    padding: 6px 8px;
+    font-size: 13px;
   }
 }

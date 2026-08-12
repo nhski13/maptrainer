@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 — 2026-08-12
+
+- Mobile top bar fix: streak chip no longer wraps to five lines on phones —
+  compact `🔥 Nd · best N` label under 560 px, tighter nav spacing, no more
+  clipped Stats button.
+
 ## 1.2.0 — 2026-08-12
 
 - **MapTap+ Pro-tier zoom fidelity.** Reverse-engineered MapTap's imagery
