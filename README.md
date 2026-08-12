@@ -62,9 +62,10 @@ npm test         # vitest suite (34 tests)
 npm run build    # typecheck + production build
 ```
 
-Stack: Vite + TypeScript, `d3-geo` orthographic projection rendered to canvas,
-`world-atlas` country borders. No backend, no API keys, fully static — deploys
-to GitHub Pages on every push to `main`.
+Stack: Vite + TypeScript, WebGL-reprojected NASA Blue Marble satellite imagery
+(bundled, public domain) with `d3-geo` vector borders overlaid, Web Audio
+synthesized sound effects. No backend, no API keys, fully static — deploys to
+GitHub Pages on every push to `main`.
 
 ## Architecture
 

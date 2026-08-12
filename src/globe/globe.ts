@@ -1,7 +1,13 @@
 /**
- * Canvas-rendered rotatable 3D globe (orthographic projection) — the same
- * interaction model as MapTap.gg: drag to rotate, scroll/pinch to zoom,
- * tap to drop a pin.
+ * Rotatable 3D globe — the MapTap.gg interaction model: drag to rotate,
+ * scroll/pinch to zoom, tap to drop a pin.
+ *
+ * Two stacked canvases:
+ *  - WebGL layer: NASA Blue Marble satellite imagery, reprojected to the
+ *    orthographic sphere in a fragment shader (60 fps while dragging).
+ *  - 2D layer: country borders, rim, pins, and the reveal geodesic, drawn
+ *    with d3-geo so vectors align exactly with the imagery.
+ * If WebGL or the texture fails, the 2D layer falls back to flat land fills.
  */
 import {
   geoOrthographic,
@@ -14,6 +20,7 @@ import {
 import { feature, mesh } from 'topojson-client';
 import type { Topology, GeometryCollection } from 'topojson-specification';
 import worldData from 'world-atlas/countries-110m.json';
+import earthUrl from '../assets/earth.jpg';
 import type { LatLon } from '../core/geo';
 
 const world = worldData as unknown as Topology<{ countries: GeometryCollection }>;
@@ -34,9 +41,165 @@ const MIN_SCALE_FACTOR = 0.45;
 const MAX_SCALE_FACTOR = 14;
 const CLICK_SLOP_PX = 6;
 
+// ── WebGL satellite layer ─────────────────────────────────────────────
+
+const VERT = `
+attribute vec2 a_pos;
+void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
+`;
+
+/**
+ * Inverse orthographic (Snyder): for each fragment on the disc, recover
+ * lon/lat for a projection centered at (u_center.x, u_center.y) and sample
+ * the equirectangular texture. Matches d3's rotate([-lon, -lat]) convention.
+ */
+const FRAG = `
+precision highp float;
+uniform vec2 u_translate;   // sphere center, device px, GL origin (bottom-left)
+uniform float u_radius;     // sphere radius, device px
+uniform vec2 u_center;      // projection center lon/lat, radians
+uniform sampler2D u_tex;
+const float PI = 3.141592653589793;
+
+void main() {
+  float X = (gl_FragCoord.x - u_translate.x) / u_radius;
+  float Y = (gl_FragCoord.y - u_translate.y) / u_radius;
+  float d2 = X * X + Y * Y;
+  if (d2 > 1.0) discard;
+  float z = sqrt(1.0 - d2);
+
+  float sinPhi0 = sin(u_center.y);
+  float cosPhi0 = cos(u_center.y);
+  float phi = asin(clamp(Y * cosPhi0 + z * sinPhi0, -1.0, 1.0));
+  float lam = u_center.x + atan(X, z * cosPhi0 - Y * sinPhi0);
+
+  vec2 uv = vec2(fract(lam / (2.0 * PI) + 0.5), 0.5 - phi / PI);
+  vec3 col = texture2D(u_tex, uv).rgb;
+
+  // limb shading for depth
+  col *= 0.42 + 0.58 * pow(z, 0.35);
+  // soft antialiased edge
+  float alpha = clamp((1.0 - sqrt(d2)) * u_radius, 0.0, 1.0);
+  gl_FragColor = vec4(col, alpha);
+}
+`;
+
+class SatelliteLayer {
+  readonly canvas: HTMLCanvasElement;
+  private gl: WebGLRenderingContext | null = null;
+  private uTranslate: WebGLUniformLocation | null = null;
+  private uRadius: WebGLUniformLocation | null = null;
+  private uCenter: WebGLUniformLocation | null = null;
+  ready = false;
+  failed = false;
+
+  constructor(private onReady: () => void) {
+    this.canvas = document.createElement('canvas');
+    this.canvas.className = 'globe-canvas globe-gl';
+    const gl = this.canvas.getContext('webgl', { alpha: true, antialias: false });
+    if (!gl) {
+      this.failed = true;
+      return;
+    }
+    this.gl = gl;
+
+    const compile = (type: number, src: string): WebGLShader | null => {
+      const s = gl.createShader(type);
+      if (!s) return null;
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error('shader:', gl.getShaderInfoLog(s));
+        return null;
+      }
+      return s;
+    };
+    const vs = compile(gl.VERTEX_SHADER, VERT);
+    const fs = compile(gl.FRAGMENT_SHADER, FRAG);
+    const prog = gl.createProgram();
+    if (!vs || !fs || !prog) {
+      this.failed = true;
+      return;
+    }
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      this.failed = true;
+      return;
+    }
+    gl.useProgram(prog);
+
+    // fullscreen quad
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+      gl.STATIC_DRAW,
+    );
+    const aPos = gl.getAttribLocation(prog, 'a_pos');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    this.uTranslate = gl.getUniformLocation(prog, 'u_translate');
+    this.uRadius = gl.getUniformLocation(prog, 'u_radius');
+    this.uCenter = gl.getUniformLocation(prog, 'u_center');
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    // load the Blue Marble texture (4096×2048 = power of two → mipmaps)
+    const img = new Image();
+    img.onload = () => {
+      if (!this.gl) return;
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      this.ready = true;
+      this.onReady();
+    };
+    img.onerror = () => {
+      this.failed = true;
+    };
+    img.src = earthUrl;
+  }
+
+  resize(wPx: number, hPx: number): void {
+    this.canvas.width = Math.max(1, wPx);
+    this.canvas.height = Math.max(1, hPx);
+    this.gl?.viewport(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  /** All spatial args in device pixels; ty measured from the top. */
+  draw(tx: number, ty: number, radius: number, centerLonRad: number, centerLatRad: number): void {
+    const gl = this.gl;
+    if (!gl || !this.ready) return;
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(this.uTranslate, tx, this.canvas.height - ty);
+    gl.uniform1f(this.uRadius, radius);
+    gl.uniform2f(this.uCenter, centerLonRad, centerLatRad);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  destroy(): void {
+    this.gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    this.canvas.remove();
+  }
+}
+
+// ── the globe ─────────────────────────────────────────────────────────
+
 export class Globe {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
+  private sat: SatelliteLayer;
   private projection: GeoProjection;
   private rotation: [number, number] = [-10, -25];
   private baseScale = 1;
@@ -55,8 +218,11 @@ export class Globe {
     private container: HTMLElement,
     private callbacks: GlobeCallbacks = {},
   ) {
+    this.sat = new SatelliteLayer(() => this.requestRender());
+    container.appendChild(this.sat.canvas);
+
     this.canvas = document.createElement('canvas');
-    this.canvas.className = 'globe-canvas';
+    this.canvas.className = 'globe-canvas globe-overlay';
     container.appendChild(this.canvas);
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D context unavailable');
@@ -77,6 +243,7 @@ export class Globe {
     cancelAnimationFrame(this.animRaf);
     window.removeEventListener('resize', this.resize);
     this.canvas.remove();
+    this.sat.destroy();
   }
 
   // ── public API ────────────────────────────────────────────────────
@@ -217,6 +384,9 @@ export class Globe {
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.sat.resize(w * dpr, h * dpr);
+    this.sat.canvas.style.width = `${w}px`;
+    this.sat.canvas.style.height = `${h}px`;
     this.baseScale = Math.min(w, h) / 2 - 12;
     this.projection.translate([w / 2, h / 2]);
     this.requestRender();
@@ -237,6 +407,7 @@ export class Globe {
     const ctx = this.ctx;
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
     this.projection.rotate([this.rotation[0], this.rotation[1], 0]);
     this.projection.scale(Math.max(10, this.baseScale * this.zoom));
     const path = geoPath(this.projection, ctx);
@@ -246,31 +417,47 @@ export class Globe {
 
     ctx.clearRect(0, 0, w, h);
 
-    // ocean
-    ctx.beginPath();
-    path({ type: 'Sphere' });
-    ctx.fillStyle = c('--ocean', '#0b1d33');
-    ctx.fill();
+    const satellite = this.sat.ready && !this.sat.failed;
+    if (satellite) {
+      const t = this.projection.translate()!;
+      const DEG = Math.PI / 180;
+      this.sat.draw(
+        t[0] * dpr,
+        t[1] * dpr,
+        this.projection.scale()! * dpr,
+        -this.rotation[0] * DEG,
+        -this.rotation[1] * DEG,
+      );
+      // subtle country borders over imagery
+      ctx.beginPath();
+      path(borders);
+      ctx.strokeStyle = c('--border-sat', 'rgba(255,255,255,0.30)');
+      ctx.lineWidth = 0.7;
+      ctx.stroke();
+    } else {
+      // flat vector fallback (texture loading, or no WebGL)
+      ctx.beginPath();
+      path({ type: 'Sphere' });
+      ctx.fillStyle = c('--ocean', '#0b1d33');
+      ctx.fill();
 
-    // graticule
-    ctx.beginPath();
-    path(graticule);
-    ctx.strokeStyle = c('--graticule', 'rgba(255,255,255,0.06)');
-    ctx.lineWidth = 0.5;
-    ctx.stroke();
+      ctx.beginPath();
+      path(graticule);
+      ctx.strokeStyle = c('--graticule', 'rgba(255,255,255,0.06)');
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
 
-    // land
-    ctx.beginPath();
-    path(land);
-    ctx.fillStyle = c('--land', '#22384f');
-    ctx.fill();
+      ctx.beginPath();
+      path(land);
+      ctx.fillStyle = c('--land', '#22384f');
+      ctx.fill();
 
-    // country borders
-    ctx.beginPath();
-    path(borders);
-    ctx.strokeStyle = c('--border', 'rgba(140,180,220,0.35)');
-    ctx.lineWidth = 0.6;
-    ctx.stroke();
+      ctx.beginPath();
+      path(borders);
+      ctx.strokeStyle = c('--border', 'rgba(140,180,220,0.35)');
+      ctx.lineWidth = 0.6;
+      ctx.stroke();
+    }
 
     // globe rim
     ctx.beginPath();

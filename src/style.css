@@ -228,7 +228,12 @@ h2 {
 }
 
 .globe-canvas {
+  position: absolute;
+  inset: 0;
   display: block;
+}
+
+.globe-overlay {
   touch-action: none;
   cursor: grab;
 }
@@ -370,7 +375,22 @@ h2 {
 .reveal-detail {
   color: var(--ink-2);
   font-size: 14px;
-  margin: 4px 0 12px;
+  margin: 4px 0 2px;
+}
+
+.reveal-quip {
+  color: var(--accent-2);
+  font-size: 13px;
+  font-style: italic;
+  margin: 2px 0 12px;
+  max-width: 340px;
+}
+
+.result-quip {
+  color: var(--accent-2);
+  font-style: italic;
+  font-size: 15px;
+  margin-top: 10px;
 }
 
 /* ── results ────────────────────────────────────────── */

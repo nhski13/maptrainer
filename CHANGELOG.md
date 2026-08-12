@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0 — 2026-08-12
+
+- **Satellite globe**: NASA Blue Marble imagery (public domain, bundled —
+  still zero external requests) reprojected onto the orthographic sphere in a
+  WebGL fragment shader, with limb shading and vector country borders overlaid.
+  Falls back to the flat vector style if WebGL is unavailable.
+- **Sound effects**: synthesized via Web Audio (no audio assets) — rising
+  fanfare for bullseyes, sad trombone for wrong-hemisphere disasters, tiers in
+  between. Mute toggle in the top bar, persisted.
+- **Trash-talk engine**: 35+ tiered quips on every reveal ("We don't geoshame
+  here. But man, that's bad.") plus grade-specific lines on the results screen.
+
 ## 1.0.0 — 2026-08-11
 
 Initial release.

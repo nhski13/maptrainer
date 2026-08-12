@@ -28,6 +28,8 @@ import {
   resetAll,
 } from './core/storage';
 import { Globe } from './globe/globe';
+import { pickQuip, GRADE_QUIPS } from './core/quips';
+import { sfxForScore, sfxLock, isMuted, toggleMuted } from './core/sfx';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -105,10 +107,15 @@ function renderTopbar(active: 'train' | 'stats' | null): HTMLElement {
       <div class="logo">Map<em>Trainer</em></div>
       <div class="streak-chip">🔥 ${streak.current}-day streak · best ${streak.best}</div>
       <div class="spacer"></div>
+      <button class="nav-btn mute-btn" title="Toggle sound">${isMuted() ? '🔇' : '🔊'}</button>
       <button class="nav-btn ${active === 'train' ? 'active' : ''}" data-nav="train">Train</button>
       <button class="nav-btn ${active === 'stats' ? 'active' : ''}" data-nav="stats">Stats</button>
     </div>
   `);
+  bar.querySelector('.mute-btn')!.addEventListener('click', (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    btn.textContent = toggleMuted() ? '🔇' : '🔊';
+  });
   bar.querySelector('.logo')!.addEventListener('click', showMenu);
   bar.querySelector('[data-nav="train"]')!.addEventListener('click', showMenu);
   bar.querySelector('[data-nav="stats"]')!.addEventListener('click', showStats);
@@ -303,8 +310,10 @@ function lockIn(screen: HTMLElement): void {
   saveStats(stats);
 
   globe.interactive = false;
+  sfxLock();
   globe.showReveal(guess, { lat: result.location.lat, lon: result.location.lon });
   showRevealCard(screen, result);
+  sfxForScore(result.score);
 }
 
 function showRevealCard(screen: HTMLElement, r: RoundResult): void {
@@ -314,10 +323,12 @@ function showRevealCard(screen: HTMLElement, r: RoundResult): void {
     ? `${formatKm(r.errorKm)} from ${esc(r.location.name)}`
     : `Time's up — no pin placed`;
   const isOver = session!.finished;
+  const quip = pickQuip(r.score, !r.guess);
   const card = el(`
     <div class="reveal-card">
       <div class="reveal-score ${cls}">+${r.score}</div>
       <div class="reveal-detail">${detail}</div>
+      <div class="reveal-quip">${esc(quip)}</div>
       <button class="btn primary reveal-next">${isOver ? 'See Results' : 'Next Round'}</button>
     </div>
   `);
@@ -359,6 +370,7 @@ function finishSession(): void {
       <div class="wrap">
         <div class="result-hero">
           <div class="result-grade">${g}</div>
+          <div class="result-quip">${esc(GRADE_QUIPS[g] ?? '')}</div>
           <div class="result-total">
             <strong>${totalScore(s)}</strong> pts · ${s.results.length} rounds ·
             avg error ${formatKm(avgErr)}
