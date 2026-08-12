@@ -29,6 +29,7 @@ import {
 } from './core/storage';
 import { Globe } from './globe/globe';
 import { pickQuip, GRADE_QUIPS } from './core/quips';
+import { sessionAvg, lastNDays, weekOverWeek, recentTrend } from './core/progress';
 import { sfxForScore, sfxLock, isMuted, toggleMuted } from './core/sfx';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -95,6 +96,7 @@ function teardownGame(): void {
 function setScreen(node: HTMLElement, nav: 'train' | 'stats' | null): void {
   teardownGame();
   app.innerHTML = '';
+  app.classList.toggle('immersive', node.classList.contains('game'));
   app.appendChild(renderTopbar(nav));
   app.appendChild(node);
 }
@@ -201,9 +203,9 @@ function startGame(mode: ModeId): void {
       <div class="globe-container"></div>
       <div class="hud-top">
         <div class="prompt-card">
-          <div class="prompt-label"></div>
-          <div class="prompt-name"></div>
-          <div class="prompt-country"></div>
+          <span class="prompt-label"></span>
+          <span class="prompt-name"></span>
+          <span class="prompt-country"></span>
         </div>
         <div class="hud-meta">
           <span class="round-counter"></span>
@@ -430,6 +432,11 @@ function showStats(): void {
         <h1>Your Training Stats</h1>
         <p class="subtitle">Progress across ${history.length} sessions.</p>
         <div class="tile-row"></div>
+        <h2>Progress</h2>
+        <div class="progress-tiles tile-row"></div>
+        <div class="trend-holder"></div>
+        <h2>Last 14 Days</h2>
+        <div class="activity-holder"></div>
         <h2>Skill by Continent</h2>
         <div class="continent-bars"></div>
         <h2>Weakest Locations — drill these</h2>
@@ -453,6 +460,105 @@ function showStats(): void {
     tile(`${attempted.length}/${LOCATIONS.length}`, 'locations seen'),
   );
   tiles.appendChild(tile(`${streak.current}🔥`, `streak (best ${streak.best})`));
+
+  // ── progress: deltas, trend chart, activity strip ──────────────────
+  const fmtDelta = (d: number): string => `${d >= 0 ? '+' : ''}${d.toFixed(1)}`;
+  const deltaColor = (d: number | null): string =>
+    d === null ? 'var(--ink-2)' : d >= 0 ? 'var(--good)' : 'var(--bad)';
+
+  const wow = weekOverWeek(history);
+  const trend = recentTrend(history);
+  const pTiles = screen.querySelector('.progress-tiles')!;
+  const pTile = (value: string, label: string, color = 'var(--ink)'): HTMLElement =>
+    el(`<div class="tile"><div class="t-value" style="color:${color}">${value}</div><div class="t-label">${label}</div></div>`);
+  pTiles.appendChild(
+    pTile(wow.thisWeek !== null ? wow.thisWeek.toFixed(0) : '—', 'avg score, last 7 days'),
+  );
+  pTiles.appendChild(
+    pTile(
+      wow.delta !== null ? fmtDelta(wow.delta) : '—',
+      'vs the week before',
+      deltaColor(wow.delta),
+    ),
+  );
+  pTiles.appendChild(
+    pTile(
+      trend !== null ? `${fmtDelta(trend)} ${trend >= 0 ? '📈' : '📉'}` : '—',
+      'last 10 sessions trend',
+      deltaColor(trend),
+    ),
+  );
+
+  const trendHolder = screen.querySelector('.trend-holder')!;
+  const recent = history.slice(-30);
+  if (recent.length < 2) {
+    trendHolder.appendChild(
+      el(`<div class="empty-note">Play a couple of sessions and your score trend appears here.</div>`),
+    );
+  } else {
+    // Session-by-session average score, oldest → newest.
+    const W = 720;
+    const H = 150;
+    const PAD = { l: 30, r: 14, t: 10, b: 18 };
+    const iw = W - PAD.l - PAD.r;
+    const ih = H - PAD.t - PAD.b;
+    const x = (i: number): number => PAD.l + (recent.length === 1 ? 0 : (i / (recent.length - 1)) * iw);
+    const y = (v: number): number => PAD.t + (1 - v / 100) * ih;
+    const pts = recent.map((s, i) => ({ x: x(i), y: y(sessionAvg(s)), s }));
+    const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const dots = pts
+      .map(
+        (p) => `
+        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" fill="var(--accent)">
+          <title>${new Date(p.s.when).toLocaleDateString()} · ${p.s.mode} · ${Math.round(sessionAvg(p.s))}/100</title>
+        </circle>`,
+      )
+      .join('');
+    const last = pts[pts.length - 1];
+    const gridLines = [0, 50, 100]
+      .map(
+        (v) => `
+        <line x1="${PAD.l}" y1="${y(v)}" x2="${W - PAD.r}" y2="${y(v)}" stroke="rgba(120,170,255,0.12)" stroke-width="1"/>
+        <text x="${PAD.l - 6}" y="${y(v) + 3.5}" text-anchor="end" font-size="10" fill="var(--ink-3)">${v}</text>`,
+      )
+      .join('');
+    trendHolder.appendChild(
+      el(`
+        <div class="trend-card">
+          <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Average score per session, last ${recent.length} sessions">
+            ${gridLines}
+            <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+            ${dots}
+            <text x="${Math.min(last.x + 8, W - 4)}" y="${Math.max(last.y - 8, 10)}" font-size="11" font-weight="700" fill="var(--ink)">${Math.round(sessionAvg(last.s))}</text>
+          </svg>
+        </div>
+      `),
+    );
+  }
+
+  const activityHolder = screen.querySelector('.activity-holder')!;
+  const days = lastNDays(history, 14);
+  const maxRounds = Math.max(1, ...days.map((d) => d.rounds));
+  const activity = el(`<div class="activity-strip"></div>`);
+  for (const d of days) {
+    const hPct = d.rounds === 0 ? 0 : Math.max(12, (d.rounds / maxRounds) * 100);
+    const weekday = 'SMTWTFS'[new Date(`${d.day}T12:00:00`).getDay()];
+    activity.appendChild(
+      el(`
+        <div class="activity-day" title="${d.day} · ${d.rounds} rounds${d.rounds ? ` · avg ${Math.round(d.avgScore)}` : ''}">
+          <div class="activity-bar-track">
+            <div class="activity-bar" style="height:${hPct}%"></div>
+          </div>
+          <div class="activity-label">${weekday}</div>
+        </div>
+      `),
+    );
+  }
+  activityHolder.appendChild(activity);
+  const playedDays = days.filter((d) => d.rounds > 0).length;
+  activityHolder.appendChild(
+    el(`<p class="activity-note">${playedDays}/14 days trained${playedDays >= 10 ? ' — the grind is real 🐐' : playedDays >= 5 ? ' — building the habit' : playedDays > 0 ? ' — streaks win championships' : ''}</p>`),
+  );
 
   const bars = screen.querySelector('.continent-bars')!;
   if (attempted.length === 0) {
@@ -514,4 +620,6 @@ function showStats(): void {
 }
 
 // ── boot ──────────────────────────────────────────────────────────────
-showMenu();
+// Land straight in a Classic game — the globe is the front door.
+// Menu stays one tap away via the logo or "Train".
+startGame('classic');

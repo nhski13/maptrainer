@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 — 2026-08-12
+
+- **Progress tracking**: Stats now answers "am I improving?" — score-trend
+  line chart over the last 30 sessions (hover a dot for date/mode/score),
+  last-14-days training activity strip, 7-day average with week-over-week
+  delta, and a last-10-sessions trend signal.
+- **Globe-first layout**: landing straight into a Classic game — the menu is
+  one tap away via the logo/Train. Game view is now edge-to-edge: the app
+  fills the full dynamic viewport (100dvh + safe-area insets, extends under
+  the mobile URL bar), the top bar floats over the globe, and the HUD is a
+  single horizontal strip (prompt pill left, round/score pill right).
+
 ## 1.2.1 — 2026-08-12
 
 - Mobile top bar fix: streak chip no longer wraps to five lines on phones —
