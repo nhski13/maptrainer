@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1 — 2026-08-12
+
+- City name in the prompt pill is never truncated — the pill grows to fit it
+  and the round/score pill wraps to a second line if space runs out. Verified
+  against the dataset's longest prompt (Kingstown · St. Vincent and the
+  Grenadines) at 375 px. The country line is what ellipsizes now, not the ask.
+- Fixed the phantom gap inside the prompt pill: empty parts (e.g. the blank
+  country line in capital drills) no longer contribute a flex gap.
+
 ## 1.3.0 — 2026-08-12
 
 - **Progress tracking**: Stats now answers "am I improving?" — score-trend
