@@ -216,6 +216,9 @@ function startGame(mode: ModeId): void {
         <button class="btn ghost reset-view">Reset view</button>
         <button class="btn primary lock-in" disabled>Lock In</button>
       </div>
+      <div class="attribution">
+        NASA Blue Marble · <a href="https://s2maps.eu" target="_blank" rel="noopener">Sentinel-2 cloudless</a> by EOX (CC BY-NC-SA 4.0)
+      </div>
     </div>
   `);
 

@@ -38,8 +38,21 @@ interface Reveal {
 }
 
 const MIN_SCALE_FACTOR = 0.45;
-const MAX_SCALE_FACTOR = 14;
+/** ~2.5° of longitude across the viewport at max — MapTap+ "minDistance" parity. */
+const MAX_SCALE_FACTOR = 48;
 const CLICK_SLOP_PX = 6;
+
+// ── Sentinel-2 detail tiles (same imagery family MapTap serves) ───────
+// EOX s2cloudless, WGS84 grid, CORS-enabled, attribution required.
+// Zoom 10 ≈ 76 m/px — MapTap+ Pro tier fidelity (their free tier caps at 8).
+const TILE_URL = (z: number, y: number, x: number): string =>
+  `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2024/default/WGS84/${z}/${y}/${x}.jpg`;
+const TILE_PX = 256;
+const MAX_TILE_ZOOM = 10;
+const MIN_TILE_ZOOM = 4;
+const MAX_TILES_PER_AXIS = 8; // patch canvas ≤ 2048×2048 (safe on mobile GPUs)
+const DETAIL_ZOOM_THRESHOLD = 2.2; // globe zoom factor where detail kicks in
+const SETTLE_MS = 280;
 
 // ── WebGL satellite layer ─────────────────────────────────────────────
 
@@ -59,6 +72,9 @@ uniform vec2 u_translate;   // sphere center, device px, GL origin (bottom-left)
 uniform float u_radius;     // sphere radius, device px
 uniform vec2 u_center;      // projection center lon/lat, radians
 uniform sampler2D u_tex;
+uniform sampler2D u_patch;  // regional Sentinel-2 detail patch
+uniform vec4 u_patchB;      // lonMin, latMax, lonSpan, latSpan (radians)
+uniform float u_patchAlpha; // 0 = no patch
 const float PI = 3.141592653589793;
 
 void main() {
@@ -76,6 +92,18 @@ void main() {
   vec2 uv = vec2(fract(lam / (2.0 * PI) + 0.5), 0.5 - phi / PI);
   vec3 col = texture2D(u_tex, uv).rgb;
 
+  // Detail patch overlay (branchless: always sample, mix by inside-test).
+  // Longitude compare is wrap-aware via mod so patches spanning the
+  // antimeridian (Fiji, Tuvalu…) still work.
+  float dLon = mod(lam - u_patchB.x, 2.0 * PI);
+  float dLat = u_patchB.y - phi;
+  float inside = step(dLon, u_patchB.z) * step(0.0, dLat) * step(dLat, u_patchB.w);
+  vec2 puv = clamp(
+    vec2(dLon / max(u_patchB.z, 1e-6), dLat / max(u_patchB.w, 1e-6)),
+    0.0, 1.0);
+  vec3 det = texture2D(u_patch, puv).rgb;
+  col = mix(col, det, inside * u_patchAlpha);
+
   // limb shading for depth
   col *= 0.42 + 0.58 * pow(z, 0.35);
   // soft antialiased edge
@@ -84,12 +112,25 @@ void main() {
 }
 `;
 
+/** Degree-space bounds of a detail patch. */
+interface PatchBounds {
+  lonMin: number; // may extend past ±180 (continuous, unwrapped)
+  latMax: number;
+  lonSpan: number;
+  latSpan: number;
+}
+
 class SatelliteLayer {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
   private uTranslate: WebGLUniformLocation | null = null;
   private uRadius: WebGLUniformLocation | null = null;
   private uCenter: WebGLUniformLocation | null = null;
+  private uPatchB: WebGLUniformLocation | null = null;
+  private uPatchAlpha: WebGLUniformLocation | null = null;
+  private patchTex: WebGLTexture | null = null;
+  private patchBounds: PatchBounds | null = null;
+  patchAlpha = 0;
   ready = false;
   failed = false;
 
@@ -145,6 +186,10 @@ class SatelliteLayer {
     this.uTranslate = gl.getUniformLocation(prog, 'u_translate');
     this.uRadius = gl.getUniformLocation(prog, 'u_radius');
     this.uCenter = gl.getUniformLocation(prog, 'u_center');
+    this.uPatchB = gl.getUniformLocation(prog, 'u_patchB');
+    this.uPatchAlpha = gl.getUniformLocation(prog, 'u_patchAlpha');
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_patch'), 1);
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -154,6 +199,7 @@ class SatelliteLayer {
     img.onload = () => {
       if (!this.gl) return;
       const tex = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
@@ -176,6 +222,31 @@ class SatelliteLayer {
     this.gl?.viewport(0, 0, this.canvas.width, this.canvas.height);
   }
 
+  /** Upload a composited tile canvas as the regional detail patch. */
+  setPatch(source: HTMLCanvasElement, bounds: PatchBounds): void {
+    const gl = this.gl;
+    if (!gl) return;
+    this.patchTex ??= gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.patchTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, source);
+    // Non-power-of-two canvas → clamp + linear, no mipmaps.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    this.patchBounds = bounds;
+  }
+
+  clearPatch(): void {
+    this.patchBounds = null;
+    this.patchAlpha = 0;
+  }
+
+  hasPatch(): boolean {
+    return this.patchBounds !== null;
+  }
+
   /** All spatial args in device pixels; ty measured from the top. */
   draw(tx: number, ty: number, radius: number, centerLonRad: number, centerLatRad: number): void {
     const gl = this.gl;
@@ -185,6 +256,15 @@ class SatelliteLayer {
     gl.uniform2f(this.uTranslate, tx, this.canvas.height - ty);
     gl.uniform1f(this.uRadius, radius);
     gl.uniform2f(this.uCenter, centerLonRad, centerLatRad);
+    const DEG = Math.PI / 180;
+    const b = this.patchBounds;
+    if (b && this.patchAlpha > 0) {
+      gl.uniform4f(this.uPatchB, b.lonMin * DEG, b.latMax * DEG, b.lonSpan * DEG, b.latSpan * DEG);
+      gl.uniform1f(this.uPatchAlpha, this.patchAlpha);
+    } else {
+      gl.uniform4f(this.uPatchB, 0, 0, 0, 0);
+      gl.uniform1f(this.uPatchAlpha, 0);
+    }
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -192,6 +272,105 @@ class SatelliteLayer {
     this.gl?.getExtension('WEBGL_lose_context')?.loseContext();
     this.canvas.remove();
   }
+}
+
+// ── Sentinel-2 tile fetching ──────────────────────────────────────────
+
+const tileCache = new Map<string, HTMLImageElement>();
+const TILE_CACHE_MAX = 400;
+
+function loadTile(z: number, y: number, x: number): Promise<HTMLImageElement> {
+  const key = `${z}/${y}/${x}`;
+  const hit = tileCache.get(key);
+  if (hit) return Promise.resolve(hit);
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (tileCache.size >= TILE_CACHE_MAX) {
+        const first = tileCache.keys().next().value;
+        if (first !== undefined) tileCache.delete(first);
+      }
+      tileCache.set(key, img);
+      resolve(img);
+    };
+    img.onerror = () => reject(new Error(`tile ${key} failed`));
+    img.src = TILE_URL(z, y, x);
+  });
+}
+
+interface DetailPlan {
+  z: number;
+  colStart: number; // continuous (may be <0 or ≥ nCols; wrapped at fetch time)
+  rowStart: number;
+  cols: number;
+  rows: number;
+  bounds: PatchBounds;
+}
+
+/**
+ * Choose tile zoom + tile range covering the current view.
+ * `pxPerDeg` is on-screen pixel density at globe center; the patch aims to
+ * match or exceed it, capped at MAX_TILE_ZOOM (MapTap+ Pro fidelity).
+ */
+function planDetail(
+  centerLon: number,
+  centerLat: number,
+  pxPerDeg: number,
+  viewWdeg: number,
+  viewHdeg: number,
+): DetailPlan | null {
+  let z = Math.ceil(Math.log2((pxPerDeg * 180) / TILE_PX));
+  z = Math.max(MIN_TILE_ZOOM, Math.min(MAX_TILE_ZOOM, z));
+
+  const halfW = Math.min(60, viewWdeg * 0.75);
+  const halfH = Math.min(60, viewHdeg * 0.75);
+
+  for (; z >= MIN_TILE_ZOOM; z--) {
+    const tileDeg = 180 / 2 ** z;
+    const nRows = 2 ** z;
+    const rowStart = Math.max(0, Math.floor((90 - (centerLat + halfH)) / tileDeg));
+    const rowEnd = Math.min(nRows - 1, Math.floor((90 - (centerLat - halfH)) / tileDeg));
+    const colStart = Math.floor((centerLon - halfW + 180) / tileDeg);
+    const colEnd = Math.floor((centerLon + halfW + 180) / tileDeg);
+    const cols = colEnd - colStart + 1;
+    const rows = rowEnd - rowStart + 1;
+    if (cols > MAX_TILES_PER_AXIS || rows > MAX_TILES_PER_AXIS) continue; // zoom out
+    return {
+      z,
+      colStart,
+      rowStart,
+      cols,
+      rows,
+      bounds: {
+        lonMin: colStart * tileDeg - 180,
+        latMax: 90 - rowStart * tileDeg,
+        lonSpan: cols * tileDeg,
+        latSpan: rows * tileDeg,
+      },
+    };
+  }
+  return null;
+}
+
+/** Fetch and composite the planned tiles. Rejects if any tile fails. */
+async function buildPatch(plan: DetailPlan): Promise<HTMLCanvasElement> {
+  const nCols = 2 ** (plan.z + 1);
+  const jobs: Promise<{ img: HTMLImageElement; cx: number; ry: number }>[] = [];
+  for (let ry = 0; ry < plan.rows; ry++) {
+    for (let cx = 0; cx < plan.cols; cx++) {
+      const col = (((plan.colStart + cx) % nCols) + nCols) % nCols; // wrap antimeridian
+      const row = plan.rowStart + ry;
+      jobs.push(loadTile(plan.z, row, col).then((img) => ({ img, cx, ry })));
+    }
+  }
+  const tiles = await Promise.all(jobs);
+  const canvas = document.createElement('canvas');
+  canvas.width = plan.cols * TILE_PX;
+  canvas.height = plan.rows * TILE_PX;
+  const ctx = canvas.getContext('2d')!;
+  for (const t of tiles) ctx.drawImage(t.img, t.cx * TILE_PX, t.ry * TILE_PX);
+  return canvas;
 }
 
 // ── the globe ─────────────────────────────────────────────────────────
@@ -212,6 +391,10 @@ export class Globe {
   private downPos: { x: number; y: number } | null = null;
   private moved = 0;
   private pinchDist = 0;
+  private settleTimer = 0;
+  private detailToken = 0;
+  private appliedDetailKey = '';
+  private fadeRaf = 0;
   interactive = true;
 
   constructor(
@@ -241,6 +424,9 @@ export class Globe {
   destroy(): void {
     cancelAnimationFrame(this.raf);
     cancelAnimationFrame(this.animRaf);
+    cancelAnimationFrame(this.fadeRaf);
+    clearTimeout(this.settleTimer);
+    this.detailToken++; // invalidate in-flight tile builds
     window.removeEventListener('resize', this.resize);
     this.canvas.remove();
     this.sat.destroy();
@@ -393,6 +579,67 @@ export class Globe {
   };
 
   private requestRender(): void {
+    cancelAnimationFrame(this.raf);
+    this.raf = requestAnimationFrame(() => this.render());
+    // Re-plan the detail patch once the view stops moving.
+    clearTimeout(this.settleTimer);
+    this.settleTimer = window.setTimeout(() => this.updateDetail(), SETTLE_MS);
+  }
+
+  /** Fetch/refresh the Sentinel-2 detail patch for the settled view. */
+  private updateDetail(): void {
+    if (!this.sat.ready || this.sat.failed) return;
+    if (this.zoom < DETAIL_ZOOM_THRESHOLD) {
+      if (this.sat.hasPatch()) {
+        this.sat.clearPatch();
+        this.appliedDetailKey = '';
+        this.requestRenderOnly();
+      }
+      return;
+    }
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    const scalePx = this.projection.scale()!;
+    const pxPerDeg = (scalePx * Math.PI) / 180;
+    const plan = planDetail(
+      -this.rotation[0],
+      -this.rotation[1],
+      pxPerDeg * (window.devicePixelRatio || 1),
+      w / pxPerDeg,
+      h / pxPerDeg,
+    );
+    if (!plan) return;
+    const key = `${plan.z}:${plan.colStart}:${plan.rowStart}:${plan.cols}:${plan.rows}`;
+    if (key === this.appliedDetailKey) return; // already showing this patch
+    const token = ++this.detailToken;
+    void buildPatch(plan)
+      .then((canvas) => {
+        if (token !== this.detailToken) return; // stale — view moved on
+        this.sat.setPatch(canvas, plan.bounds);
+        this.appliedDetailKey = key;
+        this.fadePatchIn();
+      })
+      .catch(() => {
+        /* offline or tile hiccup — base texture stays */
+      });
+  }
+
+  /** Fade the freshly-loaded patch in over ~180 ms. */
+  private fadePatchIn(): void {
+    cancelAnimationFrame(this.fadeRaf);
+    const t0 = performance.now();
+    const from = this.sat.patchAlpha;
+    const step = (now: number): void => {
+      const t = Math.min(1, (now - t0) / 180);
+      this.sat.patchAlpha = from + (1 - from) * t;
+      this.requestRenderOnly();
+      if (t < 1) this.fadeRaf = requestAnimationFrame(step);
+    };
+    this.fadeRaf = requestAnimationFrame(step);
+  }
+
+  /** Render without re-scheduling detail work (used by detail plumbing itself). */
+  private requestRenderOnly(): void {
     cancelAnimationFrame(this.raf);
     this.raf = requestAnimationFrame(() => this.render());
   }

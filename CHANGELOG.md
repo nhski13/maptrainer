@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0 — 2026-08-12
+
+- **MapTap+ Pro-tier zoom fidelity.** Reverse-engineered MapTap's imagery
+  stack: they serve a Sentinel-2 tile pyramid (free tier caps at zoom 8,
+  MapTap+ at zoom 10). MapTrainer now streams the same imagery family — EOX
+  s2cloudless WGS84 tiles — up to **zoom 10 (~76 m/px)** as a regional detail
+  patch composited over the Blue Marble base in the shader, with wrap-aware
+  bounds (antimeridian targets like Fiji work) and a 180 ms fade-in.
+- Max globe zoom deepened 14× → 48× (~2.5° across the viewport — MapTap+
+  `minDistance` parity). Tile cache (400 tiles), settle-debounced fetching,
+  and graceful fallback: offline or tile failure just keeps the base texture.
+- Imagery attribution line on the game screen (EOX CC BY-NC-SA 4.0).
+
 ## 1.1.0 — 2026-08-12
 
 - **Satellite globe**: NASA Blue Marble imagery (public domain, bundled —

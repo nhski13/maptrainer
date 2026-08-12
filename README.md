@@ -62,10 +62,20 @@ npm test         # vitest suite (34 tests)
 npm run build    # typecheck + production build
 ```
 
-Stack: Vite + TypeScript, WebGL-reprojected NASA Blue Marble satellite imagery
-(bundled, public domain) with `d3-geo` vector borders overlaid, Web Audio
-synthesized sound effects. No backend, no API keys, fully static — deploys to
-GitHub Pages on every push to `main`.
+Stack: Vite + TypeScript, WebGL-reprojected satellite imagery with `d3-geo`
+vector borders overlaid, Web Audio synthesized sound effects. No backend, no
+API keys, fully static — deploys to GitHub Pages on every push to `main`.
+
+**Imagery pipeline** (matches MapTap+ Pro fidelity — their free tier caps at
+tile zoom 8, Pro at 10):
+
+- Base: NASA Blue Marble 4096×2048 (bundled, public domain) — instant paint,
+  works offline.
+- Detail: when zoomed past ~2.2×, Sentinel-2 cloudless tiles
+  ([EOX s2maps.eu](https://s2maps.eu), CC BY-NC-SA 4.0, the same imagery
+  family MapTap serves) stream in up to WGS84 zoom 10 (~76 m/px) and are
+  composited over the base in the fragment shader. Offline or on tile
+  failure the base texture simply stays — the game never breaks.
 
 ## Architecture
 
