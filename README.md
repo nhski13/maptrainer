@@ -52,32 +52,36 @@ and Practice.
 Because the multiplier rides on difficulty, Classic and Blitz queues run
 easy → hard rather than shuffled: the ×3 rounds are the ones worth ×3.
 
-**Distance curve.** `100 · (1 − d/20,015 km)^4.6` — the remaining fraction of
-the way to the far side of the planet, raised to a power. Anchored on a
-measured MapTap round: Wolfsburg, 225 miles out, scored **92**. That one data
-point fixes the curve's only free parameter, and it showed MapTap is far more
-forgiving than it looks — a miss the width of Germany barely dents your score,
-and a wrong-continent guess still banks 30–50.
+**Distance curve.** `100 · (1 − d/20,015 km)^2.6` — the remaining fraction of
+the way to the far side of the planet, raised to a power. Fitted to rounds
+measured off MapTap's own reveal screen: **3,820 km → 58** and
+**13,060 km → 6**. Those two agree on the exponent to within 0.09, and one
+parameter reproduces both exactly.
 
-| Error | 22 km | 100 km | 362 km | 1,000 km | 3,000 km | 5,000 km | 20,015 km |
+| Error | 38 km | 500 km | 2,000 km | 3,820 km | 8,000 km | 13,060 km | 17,410 km |
 |---|---|---|---|---|---|---|---|
-| Score | 100 | 98 | **92** | 79 | 47 | 27 | 0 |
+| Score | 100 | 94 | 76 | **58** | 27 | **6** | 0 |
 
-The ~22 km bullseye and the exact zero at antipodal range both fall out of the
-formula rather than being bolted on. Distances are shown in km *and* miles,
-since miles are what MapTap reports.
+MapTap is much gentler than it looks — a miss the width of Germany barely
+registers, coast-to-coast across the USA is still a 58, and you have to be 87%
+of the way around the planet before it bottoms out at zero. The ~38 km bullseye
+and that zero point both fall out of the formula rather than being bolted on.
+Distances are shown in km *and* miles, since miles are what MapTap reports.
 
 Grades run F → GOAT and are computed on the multiplier-weighted percentage, so
 blowing a ×3 round costs you a grade.
 
 ## Reviewing your guess
 
-The globe stays live after you lock in. The reveal drops a dashed geodesic
-between your tap and the answer, labels both ends, and hangs the error
-distance on the middle of the line — then hands the controls straight back, so
-you can drag, pinch and scroll all the way down to Sentinel-2 detail and see
-exactly what you missed and by how much. **Frame both** snaps the view back to
-fit the pair; a tight guess frames itself right on top of the city.
+The reveal plays in two beats, because it has two things to say. First the
+globe frames your tap *and* the answer together, with a dashed geodesic between
+them, both ends labelled, and the error distance hung on the middle of the
+line — that's how far off you were. Then it flies over to the answer and zooms
+to city scale, dropping the pin as it lands — that's where it actually was.
+
+The globe stays live throughout: grab it at any point and the flight cancels
+rather than fighting you, so you can drag, pinch and scroll all the way down to
+Sentinel-2 detail. **Frame both** and **Zoom to answer** replay either beat.
 
 ## Strategy notes (from the trenches)
 
