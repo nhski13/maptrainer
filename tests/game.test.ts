@@ -5,8 +5,15 @@ import {
   currentLocation,
   timeLimitFor,
   totalScore,
+  totalPoints,
+  maxPoints,
+  scorePercent,
   averageScore,
+  multiplierFor,
+  currentMultiplier,
   survivalTimeForRound,
+  DAILY_MULTIPLIERS,
+  DAILY_MAX_POINTS,
   SURVIVAL_LIVES,
   SURVIVAL_MIN_SEC,
 } from '../src/core/game';
@@ -44,6 +51,9 @@ describe('classic session', () => {
     expect(currentLocation(s)).toBeNull();
     expect(totalScore(s)).toBe(500);
     expect(averageScore(s)).toBe(100);
+    // …and a flawless five-clue Daily is exactly 1,000 points.
+    expect(totalPoints(s)).toBe(DAILY_MAX_POINTS);
+    expect(scorePercent(s)).toBe(100);
   });
 
   it('scores a timeout (null guess) as zero', () => {
@@ -100,5 +110,66 @@ describe('survival session', () => {
     const loc = currentLocation(s)!;
     commitGuess(s, { lat: loc.lat, lon: loc.lon });
     expect(s.finished).toBe(true);
+  });
+});
+
+describe('MapTap round multipliers', () => {
+  it('applies the [1,1,2,3,3] Daily ladder to the five-clue modes', () => {
+    expect([...DAILY_MULTIPLIERS]).toEqual([1, 1, 2, 3, 3]);
+    for (const mode of ['classic', 'blitz'] as const) {
+      expect([0, 1, 2, 3, 4].map((i) => multiplierFor(mode, i))).toEqual([1, 1, 2, 3, 3]);
+    }
+  });
+
+  it('sums to a 1,000-point maximum', () => {
+    const total = [0, 1, 2, 3, 4].reduce((a, i) => a + multiplierFor('classic', i) * 100, 0);
+    expect(total).toBe(DAILY_MAX_POINTS);
+    expect(maxPoints(createSession('classic', QUEUE))).toBe(DAILY_MAX_POINTS);
+  });
+
+  it('scores Survival and Drill flat, like Frontier and Practice', () => {
+    for (const i of [0, 1, 2, 3, 4, 9]) {
+      expect(multiplierFor('survival', i)).toBe(1);
+      expect(multiplierFor('drill', i)).toBe(1);
+    }
+  });
+
+  it('falls back to ×1 past the fifth round', () => {
+    expect(multiplierFor('classic', 5)).toBe(1);
+    expect(multiplierFor('classic', 99)).toBe(1);
+  });
+
+  it('records the multiplier in force on each round result', () => {
+    const s = createSession('classic', QUEUE);
+    const mults: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      expect(currentMultiplier(s)).toBe(DAILY_MULTIPLIERS[i]);
+      const loc = currentLocation(s)!;
+      mults.push(commitGuess(s, { lat: loc.lat, lon: loc.lon }).multiplier);
+    }
+    expect(mults).toEqual([1, 1, 2, 3, 3]);
+    expect(s.results.map((r) => r.points)).toEqual([100, 100, 200, 300, 300]);
+  });
+
+  it('weights the grade toward the late rounds', () => {
+    // Perfect on the two ×1 rounds, blank on everything after: the flat
+    // average says 40%, but only 200 of 1,000 points actually landed.
+    const s = createSession('classic', QUEUE);
+    for (let i = 0; i < 5; i++) {
+      const loc = currentLocation(s)!;
+      commitGuess(s, i < 2 ? { lat: loc.lat, lon: loc.lon } : null);
+    }
+    expect(averageScore(s)).toBe(40);
+    expect(totalPoints(s)).toBe(200);
+    expect(scorePercent(s)).toBe(20);
+  });
+
+  it('leaves survival totals unweighted', () => {
+    const s = createSession('survival', QUEUE);
+    const loc = currentLocation(s)!;
+    const r = commitGuess(s, { lat: loc.lat, lon: loc.lon });
+    expect(r.multiplier).toBe(1);
+    expect(r.points).toBe(r.score);
+    expect(maxPoints(s)).toBe(100); // open-ended: only the rounds played count
   });
 });

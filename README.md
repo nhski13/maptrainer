@@ -36,10 +36,39 @@ account, no server, no tracking.
 
 ## Scoring
 
-Mirrors MapTap's distance-based model: **100 points inside a 15 km bullseye**,
-then exponential decay (~81 at 100 km, ~38 at 400 km, near zero past 1,200 km).
-MapTap's exact formula is unpublished; constants are tuned to match its
-published feedback examples. Grades run F → GOAT (97+ average).
+Mirrors MapTap's model on both axes — see [`docs/scoring.md`](docs/scoring.md)
+for the full derivation.
+
+**Round multipliers.** MapTap's Daily multiplies the later, harder clues, so a
+flawless five-clue run is exactly 1,000. The ladder is `×1 ×1 ×2 ×3 ×3` —
+solved from 434 complete real MapTap games (per-round scores plus posted
+totals), where it reproduces the total exactly in 94.2% of them against 6.5%
+for the next-best candidate. Classic and Blitz carry it; Survival and Drill
+score flat, mirroring Frontier and Practice.
+
+Because the multiplier rides on difficulty, Classic and Blitz queues run
+easy → hard rather than shuffled: the ×3 rounds are the ones worth ×3.
+
+**Distance curve.** 100 points inside a 15 km bullseye, then a stretched
+exponential — `100·exp(−((d−15)/1400)^0.85)`. That's ~96 at 50 km, 91 at
+100 km, 67 at 500 km, 48 at 1,000 km, 26 at 2,000 km, zero by 12,000 km.
+MapTap's exact formula is unpublished, so this is calibrated against the score
+distribution of 2,240 real rounds; the headline correction over the old
+`exp(−d/400)` model is the **tail**, which has to stay fat — ~15% of real
+rounds land in the 10–45 band, and misses that big are thousands of km, not
+hundreds.
+
+Grades run F → GOAT and are computed on the multiplier-weighted percentage, so
+blowing a ×3 round costs you a grade.
+
+## Reviewing your guess
+
+The globe stays live after you lock in. The reveal drops a dashed geodesic
+between your tap and the answer, labels both ends, and hangs the error
+distance on the middle of the line — then hands the controls straight back, so
+you can drag, pinch and scroll all the way down to Sentinel-2 detail and see
+exactly what you missed and by how much. **Frame both** snaps the view back to
+fit the pair; a tight guess frames itself right on top of the city.
 
 ## Strategy notes (from the trenches)
 
@@ -49,6 +78,8 @@ published feedback examples. Grades run F → GOAT (97+ average).
   disasters for everyone else. That's what the *Micronations* pool is for.
 - **Coastal cities hug the coast.** If the city is a port, pin the shoreline.
 - **Trust your first instinct** — the data consistently punishes second-guessing.
+- **Spend your time on rounds 4 and 5.** They're worth ×3 each — 60% of the
+  board. Rushing them to bank an early ×1 is how good players lose Dailies.
 - **Capitals aren't always the biggest dot**: Canberra not Sydney, Ankara not
   Istanbul, Bern not Zurich, Wellington not Auckland. Drill *World Capitals*
   in ask-by-country mode until these are automatic.
@@ -58,7 +89,7 @@ published feedback examples. Grades run F → GOAT (97+ average).
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # vitest suite (34 tests)
+npm test         # vitest suite (57 tests)
 npm run build    # typecheck + production build
 ```
 
@@ -81,9 +112,9 @@ tile zoom 8, Pro at 10):
 
 ```
 src/
-  core/geo.ts       haversine distance, MapTap-style scoring, grading
+  core/geo.ts       haversine distance, MapTap-calibrated scoring, grading
   core/srs.ts       spaced-repetition weighting + weighted sampling
-  core/game.ts      session state machine for all four modes
+  core/game.ts      session state machine + MapTap round multipliers
   core/storage.ts   localStorage stats, history, streaks
   data/locations.ts 300 locations: 194 capitals, 56 cities, 50 US states
   data/drills.ts    drill pool definitions
