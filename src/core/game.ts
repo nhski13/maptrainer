@@ -35,6 +35,26 @@ export function multiplierFor(mode: ModeId, roundIndex: number): number {
   return DAILY_MULTIPLIERS[roundIndex] ?? 1;
 }
 
+/**
+ * MapTap labels each Daily round by difficulty rather than by number — its
+ * reveal reads "Round: 3 (medium - points doubled)". The label and the
+ * multiplier are the same ladder: easy ×1, medium ×2, hard ×3.
+ */
+export type Difficulty = 'easy' | 'medium' | 'hard';
+
+const DIFFICULTY_BY_MULTIPLIER: Record<number, Difficulty> = {
+  1: 'easy',
+  2: 'medium',
+  3: 'hard',
+};
+
+/** Difficulty label for a round, or null in the flat-scored modes. */
+export function difficultyFor(mode: ModeId, roundIndex: number): Difficulty | null {
+  if (mode !== 'classic' && mode !== 'blitz') return null;
+  if (roundIndex >= DAILY_MULTIPLIERS.length) return null;
+  return DIFFICULTY_BY_MULTIPLIER[multiplierFor(mode, roundIndex)] ?? null;
+}
+
 export interface ModeConfig {
   rounds: number; // Infinity for survival
   timeLimitSec: number | null;

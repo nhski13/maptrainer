@@ -43,20 +43,29 @@ for the full derivation.
 flawless five-clue run is exactly 1,000. The ladder is `×1 ×1 ×2 ×3 ×3` —
 solved from 434 complete real MapTap games (per-round scores plus posted
 totals), where it reproduces the total exactly in 94.2% of them against 6.5%
-for the next-best candidate. Classic and Blitz carry it; Survival and Drill
-score flat, mirroring Frontier and Practice.
+for the next-best candidate — and confirmed straight from the game, whose
+reveal reads *"Round: 3 (medium - points doubled)"*. The ladder is really a
+difficulty ladder: easy ×1, medium ×2, hard ×3, labelled that way in the HUD.
+Classic and Blitz carry it; Survival and Drill score flat, mirroring Frontier
+and Practice.
 
 Because the multiplier rides on difficulty, Classic and Blitz queues run
 easy → hard rather than shuffled: the ×3 rounds are the ones worth ×3.
 
-**Distance curve.** 100 points inside a 15 km bullseye, then a stretched
-exponential — `100·exp(−((d−15)/1400)^0.85)`. That's ~96 at 50 km, 91 at
-100 km, 67 at 500 km, 48 at 1,000 km, 26 at 2,000 km, zero by 12,000 km.
-MapTap's exact formula is unpublished, so this is calibrated against the score
-distribution of 2,240 real rounds; the headline correction over the old
-`exp(−d/400)` model is the **tail**, which has to stay fat — ~15% of real
-rounds land in the 10–45 band, and misses that big are thousands of km, not
-hundreds.
+**Distance curve.** `100 · (1 − d/20,015 km)^4.6` — the remaining fraction of
+the way to the far side of the planet, raised to a power. Anchored on a
+measured MapTap round: Wolfsburg, 225 miles out, scored **92**. That one data
+point fixes the curve's only free parameter, and it showed MapTap is far more
+forgiving than it looks — a miss the width of Germany barely dents your score,
+and a wrong-continent guess still banks 30–50.
+
+| Error | 22 km | 100 km | 362 km | 1,000 km | 3,000 km | 5,000 km | 20,015 km |
+|---|---|---|---|---|---|---|---|
+| Score | 100 | 98 | **92** | 79 | 47 | 27 | 0 |
+
+The ~22 km bullseye and the exact zero at antipodal range both fall out of the
+formula rather than being bolted on. Distances are shown in km *and* miles,
+since miles are what MapTap reports.
 
 Grades run F → GOAT and are computed on the multiplier-weighted percentage, so
 blowing a ×3 round costs you a grade.
