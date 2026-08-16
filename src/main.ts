@@ -372,11 +372,13 @@ function showRevealCard(screen: HTMLElement, r: RoundResult): void {
       <div class="reveal-hint">Drag, pinch or scroll to inspect the answer</div>
       <div class="reveal-actions">
         <button class="btn ghost reveal-frame">Frame both</button>
+        <button class="btn ghost reveal-zoom">Zoom to answer</button>
         <button class="btn primary reveal-next">${isOver ? 'See Results' : 'Next Round'}</button>
       </div>
     </div>
   `);
   card.querySelector('.reveal-frame')!.addEventListener('click', () => globe?.frameReveal());
+  card.querySelector('.reveal-zoom')!.addEventListener('click', () => globe?.flyToAnswer());
   card.querySelector('.reveal-next')!.addEventListener('click', () => {
     card.remove();
     screen.querySelector('.hud-bottom')?.removeAttribute('hidden');

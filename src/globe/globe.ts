@@ -43,6 +43,12 @@ const MIN_SCALE_FACTOR = 0.45;
 /** ~2.5° of longitude across the viewport at max — MapTap+ "minDistance" parity. */
 const MAX_SCALE_FACTOR = 48;
 const CLICK_SLOP_PX = 6;
+/** Zoom the fly-to-answer leg settles at — city scale, deep in tile detail. */
+const ANSWER_ZOOM = 20;
+/** Beat between framing the miss and flying to the answer. */
+const REVEAL_FLY_DELAY_MS = 1400;
+/** Pin-drop animation length. */
+const DROP_MS = 520;
 
 // ── Sentinel-2 detail tiles (same imagery family MapTap serves) ───────
 // EOX s2cloudless, WGS84 grid, CORS-enabled, attribution required.
@@ -394,6 +400,9 @@ export class Globe {
   private moved = 0;
   private pinchDist = 0;
   private settleTimer = 0;
+  private revealTimer = 0;
+  private dropStart = 0;
+  private dropRaf = 0;
   private detailToken = 0;
   private appliedDetailKey = '';
   private fadeRaf = 0;
@@ -426,7 +435,9 @@ export class Globe {
     cancelAnimationFrame(this.raf);
     cancelAnimationFrame(this.animRaf);
     cancelAnimationFrame(this.fadeRaf);
+    cancelAnimationFrame(this.dropRaf);
     clearTimeout(this.settleTimer);
+    clearTimeout(this.revealTimer);
     this.detailToken++; // invalidate in-flight tile builds
     window.removeEventListener('resize', this.resize);
     this.canvas.remove();
@@ -457,13 +468,51 @@ export class Globe {
       errorKm: guess ? haversineKm(guess, target) : Infinity,
     };
     this.pin = null;
+
+    // Two beats, because the reveal has two things to say. First frame both
+    // points so the geodesic shows how far off the tap was; then fly the globe
+    // over to the answer and zoom in, so you actually see where it was.
+    this.dropPin();
     this.frameReveal();
+    clearTimeout(this.revealTimer);
+    this.revealTimer = window.setTimeout(() => this.flyToAnswer(), REVEAL_FLY_DELAY_MS);
+  }
+
+  /** Fly to the answer and zoom to city scale. Cancels the pending auto-fly. */
+  flyToAnswer(): void {
+    const r = this.reveal;
+    if (!r) return;
+    clearTimeout(this.revealTimer);
+    this.animateTo(
+      [-r.target.lon, -r.target.lat],
+      Math.min(MAX_SCALE_FACTOR, ANSWER_ZOOM),
+    );
+  }
+
+  /** Animate the target marker dropping into place. */
+  private dropPin(): void {
+    cancelAnimationFrame(this.dropRaf);
+    this.dropStart = performance.now();
+    const step = (): void => {
+      this.requestRenderOnly();
+      if (performance.now() - this.dropStart < DROP_MS) {
+        this.dropRaf = requestAnimationFrame(step);
+      }
+    };
+    this.dropRaf = requestAnimationFrame(step);
+  }
+
+  /** 0 → 1 over the drop, eased with a small overshoot at the end. */
+  private dropProgress(): number {
+    const t = Math.min(1, (performance.now() - this.dropStart) / DROP_MS);
+    return 1 - Math.pow(1 - t, 3);
   }
 
   /** (Re-)frame the reveal so both markers sit comfortably on screen. */
   frameReveal(): void {
     const r = this.reveal;
     if (!r) return;
+    clearTimeout(this.revealTimer);
     const focus = r.guess
       ? geoInterpolate([r.guess.lon, r.guess.lat], [r.target.lon, r.target.lat])(0.5)
       : ([r.target.lon, r.target.lat] as [number, number]);
@@ -489,6 +538,8 @@ export class Globe {
   }
 
   clearReveal(): void {
+    clearTimeout(this.revealTimer);
+    cancelAnimationFrame(this.dropRaf);
     this.reveal = null;
     this.requestRender();
   }
@@ -500,6 +551,9 @@ export class Globe {
   // ── interaction ───────────────────────────────────────────────────
 
   private onPointerDown = (e: PointerEvent): void => {
+    // Grabbing the globe means you want to look around yourself — drop the
+    // scheduled fly-to rather than yanking the view out from under you.
+    clearTimeout(this.revealTimer);
     this.canvas.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
     if (this.pointers.size === 1) {
@@ -543,6 +597,7 @@ export class Globe {
   };
 
   private onWheel = (e: WheelEvent): void => {
+    clearTimeout(this.revealTimer);
     e.preventDefault();
     // Trackpad pinch arrives as wheel + ctrlKey; both zoom.
     const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002));
@@ -794,8 +849,13 @@ export class Globe {
       this.drawLabel(guess, 'Your tap', c('--pin', '#ffb545'));
     }
 
-    this.drawMarker(target, c('--target', '#3ddc84'), true);
-    if (targetLabel) this.drawLabel(target, targetLabel, c('--target', '#3ddc84'));
+    // The answer pin literally drops in, so the eye is drawn to it.
+    const drop = this.dropProgress();
+    const dropPx = (1 - drop) * -34;
+    this.drawMarker(target, c('--target', '#3ddc84'), true, dropPx, drop);
+    if (targetLabel) {
+      this.drawLabel(target, targetLabel, c('--target', '#3ddc84'), dropPx, drop);
+    }
 
     // Distance chip, pinned to the middle of the geodesic — the answer to
     // "how badly did I miss?" sits on the line that shows the miss.
@@ -809,33 +869,53 @@ export class Globe {
     }
   }
 
-  private drawMarker(p: LatLon, color: string, ring = false): void {
+  private drawMarker(
+    p: LatLon,
+    color: string,
+    ring = false,
+    dy = 0,
+    alpha = 1,
+  ): void {
     if (!this.isVisible(p)) return;
     const pt = this.projection([p.lon, p.lat]);
     if (!pt) return;
     const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.arc(pt[0], pt[1], 5, 0, Math.PI * 2);
+    ctx.arc(pt[0], pt[1] + dy, 5, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(0,0,0,0.55)';
     ctx.stroke();
     if (ring) {
+      // Landed ring expands out of the dot as the drop finishes.
       ctx.beginPath();
-      ctx.arc(pt[0], pt[1], 10, 0, Math.PI * 2);
+      ctx.arc(pt[0], pt[1] + dy, 6 + 4 * alpha, 0, Math.PI * 2);
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+    ctx.restore();
   }
 
   /** Marker caption, offset above the dot. */
-  private drawLabel(p: LatLon, text: string, color: string): void {
+  private drawLabel(
+    p: LatLon,
+    text: string,
+    color: string,
+    dy = 0,
+    alpha = 1,
+  ): void {
     if (!this.isVisible(p)) return;
     const pt = this.projection([p.lon, p.lat]);
     if (!pt) return;
-    this.drawChip(pt[0], pt[1] - 20, text, color, false);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    this.drawChip(pt[0], pt[1] + dy - 20, text, color, false);
+    ctx.restore();
   }
 
   /** Rounded pill of text centred on (x, y). */

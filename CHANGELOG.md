@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.6.0 — 2026-08-16
+
+- **Refit the curve again, on two more measured rounds** — and this time two
+  independent anchors agree. From MapTap's own reveal screen:
+  **3,820 km → 58** (Santa Monica) and **13,060 km → 6** (Nicosia). Solved
+  separately they give k = 2.572 and 2.662, and a single exponent of **2.6**
+  reproduces both exactly. The curve is now `100·(1 − d/20,015 km)^2.6`.
+
+  Every model so far has been far too harsh. On that real 58-point round:
+
+  | Model | Scored it |
+  |---|---|
+  | v1.3 | 8 |
+  | v1.4 | 17 |
+  | v1.5 | 38 |
+  | **v1.6** | **58** ✅ |
+
+  Zero is now reachable — the score first rounds to 0 at **17,410 km**, 87% of
+  the way around the planet, which matches players actually posting zeroes.
+  The bullseye widens to ~38 km, still emergent from the formula.
+
+  The older Wolfsburg round (362 km → 92, from a build that reported miles and
+  wrote the score as "92%") remains an outlier the model puts at 95. No
+  two-parameter family tested fits all three better than ±2, so the two
+  consistent current-build rounds win. Detail in `docs/scoring.md`.
+- **The reveal now flies the globe to the answer.** It used to stop at the
+  midpoint between your tap and the target, so the globe never actually
+  travelled to the place you were looking for. Now the reveal plays in two
+  beats: frame both points so the geodesic shows the miss, then fly over to the
+  answer, zoom to city scale, and drop the pin as it lands.
+- Touching the globe cancels the pending fly-to instead of yanking the view
+  away mid-drag. **Frame both** and **Zoom to answer** replay either beat.
+
 ## 1.5.0 — 2026-08-16
 
 - **Refit the distance curve on a measured MapTap round.** A reveal screenshot

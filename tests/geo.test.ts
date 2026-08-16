@@ -57,28 +57,35 @@ describe('scoreForDistance', () => {
     }
   });
 
-  // THE anchor: a real MapTap round (Wolfsburg, reported as "Score: 92%
-  // Distance: 225 miles"). Every constant in the curve exists to hit this.
-  it('reproduces the measured MapTap round: 225 miles → 92', () => {
-    expect(scoreForDistance(225 * KM_PER_MILE)).toBe(92);
+  // THE anchors: real MapTap rounds, read off the game's own reveal screen.
+  // The two modern ones (same build, same day) are what the curve is fitted
+  // to — one parameter, both reproduced exactly.
+  it('reproduces the measured MapTap rounds', () => {
+    expect(scoreForDistance(3820)).toBe(58); // Santa Monica
+    expect(scoreForDistance(13060)).toBe(6); // Nicosia
   });
 
   it('matches the curve at its reference distances', () => {
-    expect(scoreForDistance(100)).toBe(98);
-    expect(scoreForDistance(500)).toBe(89);
-    expect(scoreForDistance(1000)).toBe(79);
-    expect(scoreForDistance(2000)).toBe(62);
-    expect(scoreForDistance(3000)).toBe(47);
-    expect(scoreForDistance(5000)).toBe(27);
-    expect(scoreForDistance(10000)).toBe(4);
+    expect(scoreForDistance(500)).toBe(94);
+    expect(scoreForDistance(1000)).toBe(88);
+    expect(scoreForDistance(2000)).toBe(76);
+    expect(scoreForDistance(5000)).toBe(47);
+    expect(scoreForDistance(8000)).toBe(27);
+    expect(scoreForDistance(15000)).toBe(3);
   });
 
   it('is forgiving — MapTap does not punish country-scale misses', () => {
-    // Both earlier models scored the measured Wolfsburg round 42 and 74.
-    // A miss the width of Germany should still be in the 90s.
-    expect(scoreForDistance(400)).toBeGreaterThanOrEqual(90);
-    // A wrong-continent guess still banks a real score, not a rounding error.
-    expect(scoreForDistance(4000)).toBeGreaterThan(30);
+    // A miss the width of Germany barely dents the score…
+    expect(scoreForDistance(400)).toBeGreaterThanOrEqual(94);
+    // …and coast-to-coast across the USA is still a pass mark.
+    expect(scoreForDistance(4000)).toBeGreaterThan(55);
+  });
+
+  it('makes zero reachable, but only from most of a planet away', () => {
+    // Players do post zeroes, so the curve has to bottom out inside the
+    // range of real misses — but not before a genuinely catastrophic one.
+    expect(scoreForDistance(13000)).toBeGreaterThan(0);
+    expect(scoreForDistance(17410)).toBe(0);
   });
 
   it('bottoms out exactly at the antipode and stays there', () => {
@@ -89,8 +96,8 @@ describe('scoreForDistance', () => {
   it('has a bullseye that falls out of the curve rather than being bolted on', () => {
     // ~5–11% of real rounds score exactly 100, which needs a radius of
     // tens of km — the exponent produces one without a piecewise branch.
-    expect(BULLSEYE_KM).toBeGreaterThan(15);
-    expect(BULLSEYE_KM).toBeLessThan(30);
+    expect(BULLSEYE_KM).toBeGreaterThan(25);
+    expect(BULLSEYE_KM).toBeLessThan(55);
     expect(scoreForDistance(BULLSEYE_KM - 1)).toBe(MAX_SCORE);
     expect(scoreForDistance(BULLSEYE_KM + 1)).toBeLessThan(MAX_SCORE);
   });

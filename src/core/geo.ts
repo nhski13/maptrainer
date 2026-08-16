@@ -4,14 +4,15 @@
  * Two things had to be right for MapTrainer's numbers to mean anything:
  *
  * 1. The per-round curve. MapTap scores each tap 0–100 by great-circle error.
- *    The formula is unpublished, so this one is anchored on a measured round
- *    from the game itself — 225 miles out scored 92 — which fixes its single
- *    free parameter. See `docs/scoring.md`.
+ *    The formula is unpublished, so this one is anchored on measured rounds
+ *    read off the game's own reveal screen, which fix its single free
+ *    parameter. See `docs/scoring.md`.
  *
- *    MapTap is far more forgiving than it looks: 92 for a 362 km miss means
- *    the curve is nearly flat across a whole country, and a wrong-continent
- *    guess still banks 30–50. Both earlier models here were badly harsh —
- *    they scored that same Wolfsburg round 42 and 74 respectively.
+ *    MapTap is far more forgiving than it looks. A miss the width of Germany
+ *    barely dents the score, a coast-to-coast miss across the USA is still a
+ *    58, and you have to be more than two thirds of the way around the planet
+ *    before it bottoms out at zero. Every earlier model here was far too
+ *    harsh: they scored a real 58-point round 8, 17 and 38 respectively.
  *
  * 2. The round multipliers, which live in `game.ts`.
  */
@@ -23,19 +24,28 @@ export const MAX_SCORE = 100;
 export const ANTIPODAL_KM = Math.PI * EARTH_RADIUS_KM;
 
 /**
- * Sole free parameter of the curve, fitted to a measured MapTap round:
- * Wolfsburg, 225 miles (362.1 km) out, scored 92.
+ * Sole free parameter of the curve, fitted to measured MapTap rounds — pairs
+ * of (distance, score) read straight off the game's own reveal screen:
  *
- *   k = ln(0.92) / ln(1 − 362.1/20015) = 4.567
+ *   Santa Monica   3,820 km → 58     ← both hit exactly
+ *   Nicosia       13,060 km →  6     ←
+ *   Wolfsburg        362 km → 92     ← model says 95
  *
- * MapTap displays miles rounded to the unit and the score as a whole percent,
- * so the anchor really pins k to [4.28, 4.86]; 4.6 sits in the middle of that
- * window and reproduces the observed 92 exactly.
+ * The first two are from the same build of the game on the same day and agree
+ * with each other on k to within 0.09; k = 2.6 sits mid-window (2.586–2.613)
+ * of the values that round both to their reported scores.
+ *
+ * The Wolfsburg round is from a visibly older build — it reports miles rather
+ * than km and writes the score as "92%" — and wants k = 4.57 on its own. No
+ * two-parameter family tested reconciles all three to better than ±2, so
+ * rather than contort the curve around a stale data point, this fits the two
+ * consistent modern ones exactly and carries the +3 on Wolfsburg. Supersede
+ * it the moment a current-build round near 400 km turns up.
  */
-export const SCORE_EXPONENT = 4.6;
+export const SCORE_EXPONENT = 2.6;
 
 /**
- * Bullseye radius, ~21.7 km: the distance at which the score stops rounding
+ * Bullseye radius, ~38 km: the distance at which the score stops rounding
  * to a flat 100 (it is exactly the 99.5 crossing, so treat it as the edge,
  * not as a value that scores 100 itself).
  *
@@ -70,11 +80,12 @@ export function haversineKm(a: LatLon, b: LatLon): number {
  * of the planet, raised to a power. Smooth, monotonic, exactly 100 at zero
  * and exactly 0 at the antipode — no piecewise seams.
  *
- *   score(d) = 100 · (1 − d / 20,015 km) ^ 4.6
+ *   score(d) = 100 · (1 − d / 20,015 km) ^ 2.6
  *
  * Reference points:
- *   ≤22 km → 100 · 100 km → 98 · 362 km → 92 (measured) · 1,000 km → 79
- *   2,000 km → 62 · 3,000 km → 47 · 5,000 km → 27 · 10,000 km → 4
+ *   ≤38 km → 100 · 500 km → 94 · 1,000 km → 88 · 2,000 km → 76
+ *   3,820 km → 58 (measured) · 8,000 km → 27 · 13,060 km → 6 (measured)
+ *   17,410 km+ → 0 — a zero is possible, but you have to earn it
  */
 export function scoreForDistance(km: number): number {
   if (!Number.isFinite(km) || km < 0) return 0;
