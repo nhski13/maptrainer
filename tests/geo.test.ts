@@ -4,8 +4,12 @@ import {
   scoreForDistance,
   scoreEmoji,
   formatKm,
+  formatMiles,
+  formatDistance,
   grade,
+  ANTIPODAL_KM,
   BULLSEYE_KM,
+  KM_PER_MILE,
   MAX_SCORE,
 } from '../src/core/geo';
 
@@ -41,7 +45,7 @@ describe('haversineKm', () => {
 describe('scoreForDistance', () => {
   it('gives max score inside the bullseye', () => {
     expect(scoreForDistance(0)).toBe(MAX_SCORE);
-    expect(scoreForDistance(BULLSEYE_KM)).toBe(MAX_SCORE);
+    expect(scoreForDistance(BULLSEYE_KM - 1)).toBe(MAX_SCORE);
   });
 
   it('is monotonically non-increasing', () => {
@@ -53,23 +57,42 @@ describe('scoreForDistance', () => {
     }
   });
 
-  it('matches the calibrated MapTap curve at its reference distances', () => {
-    // Fitted to the score distribution of 2,240 real MapTap rounds.
-    expect(scoreForDistance(50)).toBe(96);
-    expect(scoreForDistance(100)).toBe(91);
-    expect(scoreForDistance(250)).toBe(80);
-    expect(scoreForDistance(500)).toBe(67);
-    expect(scoreForDistance(1000)).toBe(48);
-    expect(scoreForDistance(2000)).toBe(26);
-    expect(scoreForDistance(5000)).toBe(5);
+  // THE anchor: a real MapTap round (Wolfsburg, reported as "Score: 92%
+  // Distance: 225 miles"). Every constant in the curve exists to hit this.
+  it('reproduces the measured MapTap round: 225 miles → 92', () => {
+    expect(scoreForDistance(225 * KM_PER_MILE)).toBe(92);
   });
 
-  it('keeps a fat tail — a wrong-continent miss still scores, an antipodal one does not', () => {
-    // The old exp(-d/400) curve was already at ~0 by 1,200 km, which cannot
-    // produce the 10–45 band that ~15% of real MapTap rounds land in.
-    expect(scoreForDistance(1500)).toBeGreaterThan(30);
-    expect(scoreForDistance(3000)).toBeGreaterThan(10);
-    expect(scoreForDistance(12000)).toBe(0);
+  it('matches the curve at its reference distances', () => {
+    expect(scoreForDistance(100)).toBe(98);
+    expect(scoreForDistance(500)).toBe(89);
+    expect(scoreForDistance(1000)).toBe(79);
+    expect(scoreForDistance(2000)).toBe(62);
+    expect(scoreForDistance(3000)).toBe(47);
+    expect(scoreForDistance(5000)).toBe(27);
+    expect(scoreForDistance(10000)).toBe(4);
+  });
+
+  it('is forgiving — MapTap does not punish country-scale misses', () => {
+    // Both earlier models scored the measured Wolfsburg round 42 and 74.
+    // A miss the width of Germany should still be in the 90s.
+    expect(scoreForDistance(400)).toBeGreaterThanOrEqual(90);
+    // A wrong-continent guess still banks a real score, not a rounding error.
+    expect(scoreForDistance(4000)).toBeGreaterThan(30);
+  });
+
+  it('bottoms out exactly at the antipode and stays there', () => {
+    expect(scoreForDistance(ANTIPODAL_KM)).toBe(0);
+    expect(scoreForDistance(ANTIPODAL_KM + 5000)).toBe(0);
+  });
+
+  it('has a bullseye that falls out of the curve rather than being bolted on', () => {
+    // ~5–11% of real rounds score exactly 100, which needs a radius of
+    // tens of km — the exponent produces one without a piecewise branch.
+    expect(BULLSEYE_KM).toBeGreaterThan(15);
+    expect(BULLSEYE_KM).toBeLessThan(30);
+    expect(scoreForDistance(BULLSEYE_KM - 1)).toBe(MAX_SCORE);
+    expect(scoreForDistance(BULLSEYE_KM + 1)).toBeLessThan(MAX_SCORE);
   });
 
   it('never goes below zero or above max', () => {
@@ -102,6 +125,18 @@ describe('formatKm', () => {
     expect(formatKm(0.4)).toBe('<1 km');
     expect(formatKm(42.31)).toBe('42.3 km');
     expect(formatKm(1234.6)).toBe('1,235 km');
+  });
+});
+
+describe('formatMiles', () => {
+  it('converts and formats the way MapTap reports errors', () => {
+    expect(formatMiles(0.5)).toBe('<1 mi');
+    expect(formatMiles(80.4672)).toBe('50.0 mi');
+    expect(formatMiles(225 * KM_PER_MILE)).toBe('225 mi');
+  });
+
+  it('pairs both units for the reveal', () => {
+    expect(formatDistance(225 * KM_PER_MILE)).toBe('362 km · 225 mi');
   });
 });
 
