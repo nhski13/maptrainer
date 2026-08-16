@@ -9,7 +9,16 @@ export interface SessionSummary {
   mode: string;
   when: number;
   rounds: number;
+  /**
+   * Sum of the raw 0–100 round scores. Deliberately *not* the multiplied
+   * total: the trend charts divide this by `rounds` to get a 0–100 skill
+   * number, and entries written before multipliers existed still read right.
+   */
   totalScore: number;
+  /** Multiplier-weighted scoreboard total. Absent on pre-1.4 entries. */
+  points?: number;
+  /** Points that were on the table (1,000 for a five-clue Daily). */
+  maxPoints?: number;
   avgErrorKm: number;
 }
 

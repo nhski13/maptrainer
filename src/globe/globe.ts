@@ -21,7 +21,7 @@ import { feature, mesh } from 'topojson-client';
 import type { Topology, GeometryCollection } from 'topojson-specification';
 import worldData from 'world-atlas/countries-110m.json';
 import earthUrl from '../assets/earth.jpg';
-import type { LatLon } from '../core/geo';
+import { formatKm, haversineKm, type LatLon } from '../core/geo';
 
 const world = worldData as unknown as Topology<{ countries: GeometryCollection }>;
 const land = feature(world, world.objects.countries);
@@ -35,6 +35,8 @@ export interface GlobeCallbacks {
 interface Reveal {
   guess: LatLon | null;
   target: LatLon;
+  targetLabel: string;
+  errorKm: number;
 }
 
 const MIN_SCALE_FACTOR = 0.45;
@@ -395,7 +397,6 @@ export class Globe {
   private detailToken = 0;
   private appliedDetailKey = '';
   private fadeRaf = 0;
-  interactive = true;
 
   constructor(
     private container: HTMLElement,
@@ -443,14 +444,48 @@ export class Globe {
     return this.pin;
   }
 
-  /** Show guess → target reveal, rotating to frame the result. */
-  showReveal(guess: LatLon | null, target: LatLon): void {
-    this.reveal = { guess, target };
+  /**
+   * Show the guess → target reveal and frame it. The globe stays live
+   * afterwards: drag and pinch keep working so you can scroll around the
+   * answer and see exactly what you missed. Only pin-dropping is locked out.
+   */
+  showReveal(guess: LatLon | null, target: LatLon, targetLabel = ''): void {
+    this.reveal = {
+      guess,
+      target,
+      targetLabel,
+      errorKm: guess ? haversineKm(guess, target) : Infinity,
+    };
     this.pin = null;
-    const focus = guess
-      ? geoInterpolate([guess.lon, guess.lat], [target.lon, target.lat])(0.5)
-      : ([target.lon, target.lat] as [number, number]);
-    this.animateTo([-focus[0], -focus[1]]);
+    this.frameReveal();
+  }
+
+  /** (Re-)frame the reveal so both markers sit comfortably on screen. */
+  frameReveal(): void {
+    const r = this.reveal;
+    if (!r) return;
+    const focus = r.guess
+      ? geoInterpolate([r.guess.lon, r.guess.lat], [r.target.lon, r.target.lat])(0.5)
+      : ([r.target.lon, r.target.lat] as [number, number]);
+    this.animateTo([-focus[0], -focus[1]], this.zoomToFitReveal());
+  }
+
+  /**
+   * Zoom that fits both markers. Centred on the midpoint each sits sin(θ/2)
+   * of a radius from centre, so the pair spans 2·R·sin(θ/2) on screen; solve
+   * for the R that keeps that inside ~62% of the viewport. A tight guess
+   * yields a huge number and simply clamps to max zoom — which is the good
+   * case: you get dropped into Sentinel-2 detail right on top of the city.
+   */
+  private zoomToFitReveal(): number {
+    const r = this.reveal;
+    if (!r) return this.zoom;
+    const viewport = Math.min(this.container.clientWidth, this.container.clientHeight);
+    if (!r.guess || this.baseScale <= 0) return Math.min(MAX_SCALE_FACTOR, 6);
+    const theta = geoDistance([r.guess.lon, r.guess.lat], [r.target.lon, r.target.lat]);
+    const half = Math.max(Math.sin(theta / 2), 1e-4);
+    const fit = (0.31 * viewport) / (half * this.baseScale);
+    return Math.max(MIN_SCALE_FACTOR, Math.min(MAX_SCALE_FACTOR, fit));
   }
 
   clearReveal(): void {
@@ -459,14 +494,12 @@ export class Globe {
   }
 
   resetView(): void {
-    this.zoom = 1;
-    this.animateTo([-10, -25]);
+    this.animateTo([-10, -25], 1);
   }
 
   // ── interaction ───────────────────────────────────────────────────
 
   private onPointerDown = (e: PointerEvent): void => {
-    if (!this.interactive) return;
     this.canvas.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
     if (this.pointers.size === 1) {
@@ -479,7 +512,7 @@ export class Globe {
   };
 
   private onPointerMove = (e: PointerEvent): void => {
-    if (!this.interactive || !this.pointers.has(e.pointerId)) return;
+    if (!this.pointers.has(e.pointerId)) return;
     const prev = this.pointers.get(e.pointerId)!;
     const dx = e.offsetX - prev.x;
     const dy = e.offsetY - prev.y;
@@ -502,7 +535,7 @@ export class Globe {
   private onPointerUp = (e: PointerEvent): void => {
     this.pointers.delete(e.pointerId);
     this.pinchDist = 0;
-    if (!this.interactive || !this.downPos) return;
+    if (!this.downPos) return;
     if (this.pointers.size === 0 && this.moved < CLICK_SLOP_PX) {
       this.handleTap(e.offsetX, e.offsetY);
     }
@@ -510,7 +543,6 @@ export class Globe {
   };
 
   private onWheel = (e: WheelEvent): void => {
-    if (!this.interactive) return;
     e.preventDefault();
     // Trackpad pinch arrives as wheel + ctrlKey; both zoom.
     const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002));
@@ -528,7 +560,9 @@ export class Globe {
   }
 
   private handleTap(x: number, y: number): void {
-    if (this.reveal) return; // reveal screen is read-only
+    // Rotation and zoom stay live during a reveal so you can inspect the
+    // answer; only dropping a new pin is locked out.
+    if (this.reveal) return;
     const t = this.projection.translate()!;
     const r = this.projection.scale()!;
     if (Math.hypot(x - t[0], y - t[1]) > r) return; // tapped off-globe
@@ -541,19 +575,24 @@ export class Globe {
 
   // ── animation ─────────────────────────────────────────────────────
 
-  private animateTo(target: [number, number]): void {
+  private animateTo(target: [number, number], targetZoom = this.zoom): void {
     cancelAnimationFrame(this.animRaf);
     const start: [number, number] = [...this.rotation];
     // take the short way around in longitude
     let dLon = target[0] - start[0];
     dLon = ((dLon + 540) % 360) - 180;
     const dLat = target[1] - start[1];
+    // Zoom is a scale, so interpolate it geometrically — a linear ramp from
+    // 1× to 40× spends almost the whole animation already deep in the zoom.
+    const zoomFrom = this.zoom;
+    const zoomRatio = Math.log(targetZoom / zoomFrom);
     const t0 = performance.now();
     const dur = 650;
     const step = (now: number): void => {
       const t = Math.min(1, (now - t0) / dur);
       const e = 1 - Math.pow(1 - t, 3); // ease-out cubic
       this.rotation = [start[0] + dLon * e, start[1] + dLat * e];
+      this.zoom = zoomFrom * Math.exp(zoomRatio * e);
       this.requestRender();
       if (t < 1) this.animRaf = requestAnimationFrame(step);
     };
@@ -718,30 +757,56 @@ export class Globe {
   }
 
   private renderReveal(path: ReturnType<typeof geoPath>): void {
-    const { guess, target } = this.reveal!;
+    const { guess, target, targetLabel, errorKm } = this.reveal!;
     const ctx = this.ctx;
     const styles = getComputedStyle(document.documentElement);
     const c = (name: string, fallback: string): string =>
       styles.getPropertyValue(name).trim() || fallback;
+    const lineColor = c('--reveal-line', 'rgba(255,181,69,0.9)');
 
     if (guess) {
-      // geodesic from guess to target
-      ctx.beginPath();
-      path({
-        type: 'LineString',
+      // Geodesic guess → target, drawn twice: a soft wide pass so the line
+      // survives bright satellite imagery, then the dashed line itself.
+      const geodesic = {
+        type: 'LineString' as const,
         coordinates: [
           [guess.lon, guess.lat],
           [target.lon, target.lat],
         ],
-      });
-      ctx.strokeStyle = c('--reveal-line', 'rgba(255,181,69,0.9)');
-      ctx.lineWidth = 1.8;
-      ctx.setLineDash([6, 4]);
+      };
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      path(geodesic);
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = 5;
       ctx.stroke();
-      ctx.setLineDash([]);
+
+      ctx.beginPath();
+      path(geodesic);
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 2.2;
+      ctx.setLineDash([7, 5]);
+      ctx.stroke();
+      ctx.restore();
+
       this.drawMarker(guess, c('--pin', '#ffb545'));
+      this.drawLabel(guess, 'Your tap', c('--pin', '#ffb545'));
     }
+
     this.drawMarker(target, c('--target', '#3ddc84'), true);
+    if (targetLabel) this.drawLabel(target, targetLabel, c('--target', '#3ddc84'));
+
+    // Distance chip, pinned to the middle of the geodesic — the answer to
+    // "how badly did I miss?" sits on the line that shows the miss.
+    if (guess && Number.isFinite(errorKm)) {
+      const mid = geoInterpolate([guess.lon, guess.lat], [target.lon, target.lat])(0.5);
+      const midPoint = { lon: mid[0], lat: mid[1] };
+      if (this.isVisible(midPoint)) {
+        const pt = this.projection([mid[0], mid[1]]);
+        if (pt) this.drawChip(pt[0], pt[1], formatKm(errorKm), lineColor, true);
+      }
+    }
   }
 
   private drawMarker(p: LatLon, color: string, ring = false): void {
@@ -763,5 +828,41 @@ export class Globe {
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+  }
+
+  /** Marker caption, offset above the dot. */
+  private drawLabel(p: LatLon, text: string, color: string): void {
+    if (!this.isVisible(p)) return;
+    const pt = this.projection([p.lon, p.lat]);
+    if (!pt) return;
+    this.drawChip(pt[0], pt[1] - 20, text, color, false);
+  }
+
+  /** Rounded pill of text centred on (x, y). */
+  private drawChip(x: number, y: number, text: string, color: string, strong: boolean): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = strong
+      ? '700 13px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif'
+      : '600 11px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif';
+    const padX = strong ? 9 : 7;
+    const h = strong ? 22 : 18;
+    const w = ctx.measureText(text).width + padX * 2;
+    const left = x - w / 2;
+    const top = y - h / 2;
+
+    ctx.beginPath();
+    ctx.roundRect(left, top, w, h, h / 2);
+    ctx.fillStyle = 'rgba(6, 13, 24, 0.82)';
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = strong ? color : '#e8eef7';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y + 0.5);
+    ctx.restore();
   }
 }

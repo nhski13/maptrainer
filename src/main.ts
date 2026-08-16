@@ -2,14 +2,18 @@ import './style.css';
 import { LOCATIONS, CONTINENTS } from './data/locations';
 import type { Location } from './data/types';
 import { DRILLS, drillPool, type Drill } from './data/drills';
-import { formatKm, grade, type LatLon } from './core/geo';
+import { formatKm, grade, scoreEmoji, type LatLon } from './core/geo';
 import {
   createSession,
   commitGuess,
   currentLocation,
   currentRound,
+  currentMultiplier,
   timeLimitFor,
   totalScore,
+  totalPoints,
+  maxPoints,
+  scorePercent,
   averageScore,
   MODE_CONFIG,
   SURVIVAL_LIVES,
@@ -186,11 +190,14 @@ function buildQueue(mode: ModeId): Location[] {
     const t3 = pickWeighted(LOCATIONS.filter((l) => l.tier === 3), stats, 40, now);
     return [...t1, ...t2, ...t3];
   }
-  // classic & blitz: MapTap-like mix, mostly famous with a curveball or two.
+  // Classic & blitz: the MapTap Daily shape — a famous opener, a curveball
+  // closer. Deliberately NOT shuffled: MapTap ramps difficulty across the five
+  // clues and hangs the ×2/×3 multipliers on the late ones, so the hard
+  // locations have to land in the rounds that are worth the most.
   const easy = pickWeighted(LOCATIONS.filter((l) => l.tier === 1), stats, 2, now);
   const mid = pickWeighted(LOCATIONS.filter((l) => l.tier === 2), stats, 2, now);
   const hard = pickWeighted(LOCATIONS.filter((l) => l.tier === 3), stats, 1, now);
-  return [...easy, ...mid, ...hard].sort(() => Math.random() - 0.5);
+  return [...easy, ...mid, ...hard];
 }
 
 function startGame(mode: ModeId): void {
@@ -209,6 +216,7 @@ function startGame(mode: ModeId): void {
         </div>
         <div class="hud-meta">
           <span class="round-counter"></span>
+          <span class="multiplier" hidden></span>
           <span class="score-so-far"></span>
           <span class="timer" hidden></span>
           <span class="lives" hidden></span>
@@ -256,7 +264,6 @@ function beginRound(screen: HTMLElement): void {
 
   globe.clearReveal();
   globe.setPin(null);
-  globe.interactive = true;
   screen.querySelector<HTMLButtonElement>('.lock-in')!.disabled = true;
 
   const askByCountry =
@@ -269,7 +276,19 @@ function beginRound(screen: HTMLElement): void {
     session.mode === 'survival' ? '∞' : String(Math.min(session.queue.length, MODE_CONFIG[session.mode].rounds));
   screen.querySelector('.round-counter')!.innerHTML =
     `Round <strong>${currentRound(session) + 1}</strong>/${roundsTotal}`;
-  screen.querySelector('.score-so-far')!.innerHTML = `Score <strong>${totalScore(session)}</strong>`;
+
+  // The multiplier is the whole strategy of a MapTap Daily — show it before
+  // the tap, not after, so a ×3 round gets the attention it deserves.
+  const mult = currentMultiplier(session);
+  const multEl = screen.querySelector<HTMLElement>('.multiplier')!;
+  multEl.hidden = mult === 1;
+  multEl.textContent = `×${mult}`;
+  multEl.classList.toggle('hot', mult >= 3);
+
+  const cap = maxPoints(session);
+  screen.querySelector('.score-so-far')!.innerHTML = session.mode === 'survival'
+    ? `Score <strong>${totalPoints(session)}</strong>`
+    : `Score <strong>${totalPoints(session)}</strong>/${cap}`;
 
   const livesEl = screen.querySelector<HTMLElement>('.lives')!;
   if (session.mode === 'survival') {
@@ -314,9 +333,15 @@ function lockIn(screen: HTMLElement): void {
   );
   saveStats(stats);
 
-  globe.interactive = false;
+  // The globe stays live through the reveal — you can drag, pinch and zoom
+  // right down to Sentinel-2 detail to study where the answer actually was.
+  // Globe.handleTap ignores taps while a reveal is up, so the pin is safe.
   sfxLock();
-  globe.showReveal(guess, { lat: result.location.lat, lon: result.location.lon });
+  globe.showReveal(
+    guess,
+    { lat: result.location.lat, lon: result.location.lon },
+    result.location.name,
+  );
   showRevealCard(screen, result);
   sfxForScore(result.score);
 }
@@ -329,14 +354,25 @@ function showRevealCard(screen: HTMLElement, r: RoundResult): void {
     : `Time's up — no pin placed`;
   const isOver = session!.finished;
   const quip = pickQuip(r.score, !r.guess);
+  // With a multiplier in play, the raw score and the points are different
+  // numbers and both matter — show the arithmetic rather than one or other.
+  const scoreLine =
+    r.multiplier > 1
+      ? `+${r.points}<span class="reveal-math">${r.score} × ${r.multiplier}</span>`
+      : `+${r.points}`;
   const card = el(`
     <div class="reveal-card">
-      <div class="reveal-score ${cls}">+${r.score}</div>
+      <div class="reveal-score ${cls}">${scoreLine}</div>
       <div class="reveal-detail">${detail}</div>
       <div class="reveal-quip">${esc(quip)}</div>
-      <button class="btn primary reveal-next">${isOver ? 'See Results' : 'Next Round'}</button>
+      <div class="reveal-hint">Drag, pinch or scroll to inspect the answer</div>
+      <div class="reveal-actions">
+        <button class="btn ghost reveal-frame">Frame both</button>
+        <button class="btn primary reveal-next">${isOver ? 'See Results' : 'Next Round'}</button>
+      </div>
     </div>
   `);
+  card.querySelector('.reveal-frame')!.addEventListener('click', () => globe?.frameReveal());
   card.querySelector('.reveal-next')!.addEventListener('click', () => {
     card.remove();
     screen.querySelector('.hud-bottom')?.removeAttribute('hidden');
@@ -356,19 +392,28 @@ function finishSession(): void {
     ? validErrors.reduce((sum, r) => sum + r.errorKm, 0) / validErrors.length
     : 0;
 
+  const points = totalPoints(s);
+  const cap = maxPoints(s);
+
   appendHistory({
     mode: s.mode,
     when: Date.now(),
     rounds: s.results.length,
-    totalScore: totalScore(s),
+    totalScore: totalScore(s), // raw 0–100 sum: keeps the trend charts on scale
+    points,
+    maxPoints: cap,
     avgErrorKm: avgErr,
   });
   bumpStreak();
 
-  const g = grade(avg);
+  // Graded on the multiplier-weighted percentage, so a blown ×3 round hurts.
+  const pct = scorePercent(s);
+  const g = grade(pct);
+  // MapTap's own share format: the total out of 1,000 and an emoji per round.
   const shareText =
-    `MapTrainer ${s.mode} — ${totalScore(s)} pts over ${s.results.length} rounds ` +
-    `(avg ${Math.round(avg)}/100, grade ${g}) 🌍`;
+    `MapTrainer ${s.mode} — ${points}/${cap} 🌍\n` +
+    s.results.map((r) => scoreEmoji(r.score)).join('') +
+    `\navg ${Math.round(avg)}/100 · grade ${g}`;
 
   const screen = el(`
     <div class="screen">
@@ -376,8 +421,9 @@ function finishSession(): void {
         <div class="result-hero">
           <div class="result-grade">${g}</div>
           <div class="result-quip">${esc(GRADE_QUIPS[g] ?? '')}</div>
+          <div class="result-points"><strong>${points}</strong><span>/${cap}</span></div>
           <div class="result-total">
-            <strong>${totalScore(s)}</strong> pts · ${s.results.length} rounds ·
+            ${s.results.length} rounds · avg ${Math.round(avg)}/100 ·
             avg error ${formatKm(avgErr)}
           </div>
         </div>
@@ -393,12 +439,16 @@ function finishSession(): void {
 
   const list = screen.querySelector('.round-list')!;
   for (const r of s.results) {
+    const tone =
+      r.score >= 80 ? 'var(--good)' : r.score >= 40 ? 'var(--accent-2)' : 'var(--bad)';
     list.appendChild(
       el(`
         <div class="round-row">
           <div class="r-name">${esc(r.location.name)} <span>${esc(r.location.country)}</span></div>
           <div class="r-km">${r.guess ? formatKm(r.errorKm) : 'no pin'}</div>
-          <div class="r-score" style="color:${r.score >= 80 ? 'var(--good)' : r.score >= 40 ? 'var(--accent-2)' : 'var(--bad)'}">${r.score}</div>
+          <div class="r-score" style="color:${tone}">${r.score}</div>
+          <div class="r-mult ${r.multiplier > 1 ? 'on' : ''}">×${r.multiplier}</div>
+          <div class="r-points">${r.points}</div>
         </div>
       `),
     );

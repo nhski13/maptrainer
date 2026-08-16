@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   haversineKm,
   scoreForDistance,
+  scoreEmoji,
   formatKm,
   grade,
   BULLSEYE_KM,
@@ -52,9 +53,23 @@ describe('scoreForDistance', () => {
     }
   });
 
-  it('rewards city precision and punishes continent misses', () => {
-    expect(scoreForDistance(50)).toBeGreaterThan(85);
-    expect(scoreForDistance(1200)).toBeLessThan(10);
+  it('matches the calibrated MapTap curve at its reference distances', () => {
+    // Fitted to the score distribution of 2,240 real MapTap rounds.
+    expect(scoreForDistance(50)).toBe(96);
+    expect(scoreForDistance(100)).toBe(91);
+    expect(scoreForDistance(250)).toBe(80);
+    expect(scoreForDistance(500)).toBe(67);
+    expect(scoreForDistance(1000)).toBe(48);
+    expect(scoreForDistance(2000)).toBe(26);
+    expect(scoreForDistance(5000)).toBe(5);
+  });
+
+  it('keeps a fat tail — a wrong-continent miss still scores, an antipodal one does not', () => {
+    // The old exp(-d/400) curve was already at ~0 by 1,200 km, which cannot
+    // produce the 10–45 band that ~15% of real MapTap rounds land in.
+    expect(scoreForDistance(1500)).toBeGreaterThan(30);
+    expect(scoreForDistance(3000)).toBeGreaterThan(10);
+    expect(scoreForDistance(12000)).toBe(0);
   });
 
   it('never goes below zero or above max', () => {
@@ -62,6 +77,23 @@ describe('scoreForDistance', () => {
     expect(scoreForDistance(-5)).toBe(0);
     expect(scoreForDistance(NaN)).toBe(0);
     expect(scoreForDistance(Infinity)).toBe(0);
+  });
+});
+
+describe('scoreEmoji', () => {
+  it('picks from the band the score falls in', () => {
+    expect(['🎯', '🔥', '💯', '🏅', '🥇']).toContain(scoreEmoji(100));
+    expect(['🎯', '🔥', '💯', '🏅', '🥇']).toContain(scoreEmoji(95));
+    expect(['🏆', '👑', '🥈', '🎉']).toContain(scoreEmoji(90));
+    expect(['😱', '🤢', '😭']).toContain(scoreEmoji(0));
+  });
+
+  it('always returns something, at every score', () => {
+    for (let s = 0; s <= 100; s++) expect(scoreEmoji(s)).toBeTruthy();
+  });
+
+  it('is deterministic given a fixed sampler', () => {
+    expect(scoreEmoji(100, () => 0)).toBe('🎯');
   });
 });
 

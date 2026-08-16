@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.4.0 — 2026-08-16
+
+- **Scoring now mirrors MapTap properly — including the round multipliers.**
+  MapTap's Daily multiplies the later, harder clues so a flawless five-clue run
+  is exactly 1,000; MapTrainer was scoring a flat /500 and missing the entire
+  strategic layer. The ladder `×1 ×1 ×2 ×3 ×3` was solved from 434 complete
+  real MapTap games (per-round scores plus posted totals) — it reproduces the
+  posted total exactly in 94.2% of them, against 6.5% for the next-best
+  candidate. Classic and Blitz carry it; Survival and Drill stay flat,
+  mirroring Frontier and Practice. Full derivation in `docs/scoring.md`.
+- Classic/Blitz queues are no longer shuffled — they run easy → hard, so the
+  ×3 rounds are the ones that are actually worth ×3.
+- Grades are computed on the multiplier-weighted percentage: blow a ×3 round
+  and it costs you a grade. The multiplier is shown in the HUD *before* the
+  tap, the reveal shows the arithmetic (`33 × 3`), and results break out
+  score / multiplier / points per round.
+- **Recalibrated the distance curve against 2,240 real MapTap rounds.** The
+  old `exp(−d/400)` decay was at ~0 by 1,200 km, which can't produce the 10–45
+  band that ~15% of real rounds land in. Replaced with a stretched exponential,
+  `100·exp(−((d−15)/1400)^0.85)`: same 15 km bullseye, gentler near field
+  (91 at 100 km), and a fat tail that only reaches zero at antipodal range.
+- Share text uses MapTap's format — total out of 1,000 plus an emoji per
+  round, with bands read off the same archive.
+- **The globe stays live after you lock in.** Previously the reveal froze it,
+  so there was no way to check your work. Now you can drag, pinch and scroll
+  through the reveal — right down to Sentinel-2 detail — to see where the
+  answer actually was.
+- The reveal draws a labelled dashed geodesic from your tap to the target with
+  the error distance pinned to the middle of the line, and auto-frames the
+  pair on reveal; a **Frame both** button snaps back to that framing after you
+  wander. A tight guess frames itself right on the city.
+
 ## 1.3.1 — 2026-08-12
 
 - City name in the prompt pill is never truncated — the pill grows to fit it
