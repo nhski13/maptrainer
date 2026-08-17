@@ -60,7 +60,23 @@ const MAX_TILE_ZOOM = 10;
 const MIN_TILE_ZOOM = 4;
 const MAX_TILES_PER_AXIS = 8; // patch canvas ≤ 2048×2048 (safe on mobile GPUs)
 const DETAIL_ZOOM_THRESHOLD = 2.2; // globe zoom factor where detail kicks in
-const SETTLE_MS = 280;
+/**
+ * How long the view must hold still before we go to the network for a patch.
+ * Short, because most of the cost has been moved off this path: the warming
+ * passes below fetch ahead of the gesture, and anything already in cache is
+ * swapped in immediately without waiting for the settle at all.
+ */
+const SETTLE_MS = 150;
+/** Floor between two cache-only patch swaps — each one re-uploads a texture. */
+const CACHED_APPLY_MS = 90;
+/** Floor between partial re-uploads while a patch is still streaming in. */
+const PATCH_PAINT_MS = 130;
+/** Tile levels the page-load warm pulls before you have touched anything. */
+const WARM_ENTRY_LEVELS = 2;
+/** Tile levels the settled view runs ahead by, once you are already zoomed in. */
+const WARM_LOOKAHEAD_LEVELS = 2;
+/** Zoom ratio the level sweep steps by — fine enough not to skip a band. */
+const LEVEL_SWEEP_STEP = 1.08;
 
 // ── WebGL satellite layer ─────────────────────────────────────────────
 
@@ -141,6 +157,12 @@ class SatelliteLayer {
   patchAlpha = 0;
   ready = false;
   failed = false;
+  /**
+   * The decoded Blue Marble image, kept around after upload. Detail patches
+   * start life as an upscaled crop of it, so a patch that is still streaming
+   * shows blur where its tiles have not landed rather than holes.
+   */
+  baseImage: HTMLImageElement | null = null;
 
   constructor(private onReady: () => void) {
     this.canvas = document.createElement('canvas');
@@ -215,6 +237,7 @@ class SatelliteLayer {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.generateMipmap(gl.TEXTURE_2D);
+      this.baseImage = img;
       this.ready = true;
       this.onReady();
     };
@@ -284,36 +307,183 @@ class SatelliteLayer {
 
 // ── Sentinel-2 tile fetching ──────────────────────────────────────────
 
+/**
+ * Decoded tiles, reused across patches. Eviction is LRU — a hit moves its key
+ * to the back — not FIFO: the warming passes stream a lot of tiles past this
+ * map, and a plain queue would push the tiles you are actually looking at out
+ * the front to make room for tiles you might never zoom to.
+ */
 const tileCache = new Map<string, HTMLImageElement>();
-const TILE_CACHE_MAX = 400;
+const TILE_CACHE_MAX = 500;
+/** In-flight loads, so a warm pass and a foreground patch share one request. */
+const tileInflight = new Map<string, Promise<HTMLImageElement>>();
+/** Keys that 404'd or timed out. Warming skips them so it can't loop offline. */
+const tileFailed = new Set<string>();
 
-function loadTile(z: number, y: number, x: number): Promise<HTMLImageElement> {
-  const key = `${z}/${y}/${x}`;
+const tileKey = (z: number, y: number, x: number): string => `${z}/${y}/${x}`;
+
+function cacheGet(key: string): HTMLImageElement | undefined {
   const hit = tileCache.get(key);
+  if (hit) {
+    tileCache.delete(key); // re-insert at the back — least-recent falls out first
+    tileCache.set(key, hit);
+  }
+  return hit;
+}
+
+function loadTile(
+  z: number,
+  y: number,
+  x: number,
+  priority: 'high' | 'low' = 'high',
+): Promise<HTMLImageElement> {
+  const key = tileKey(z, y, x);
+  const hit = cacheGet(key);
   if (hit) return Promise.resolve(hit);
-  return new Promise((resolve, reject) => {
+  const pending = tileInflight.get(key);
+  if (pending) return pending;
+
+  const job = new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
+    img.decoding = 'async';
+    // Warm tiles queue behind whatever is being drawn right now.
+    img.setAttribute('fetchpriority', priority);
     img.onload = () => {
       if (tileCache.size >= TILE_CACHE_MAX) {
-        const first = tileCache.keys().next().value;
-        if (first !== undefined) tileCache.delete(first);
+        const oldest = tileCache.keys().next().value;
+        if (oldest !== undefined) tileCache.delete(oldest);
       }
       tileCache.set(key, img);
       resolve(img);
     };
-    img.onerror = () => reject(new Error(`tile ${key} failed`));
+    img.onerror = () => {
+      tileFailed.add(key);
+      reject(new Error(`tile ${key} failed`));
+    };
     img.src = TILE_URL(z, y, x);
   });
+  tileInflight.set(key, job);
+  void job.catch(() => undefined).then(() => tileInflight.delete(key));
+  return job;
 }
 
-interface DetailPlan {
+// ── background warming ────────────────────────────────────────────────
+// Zooming used to be a cold start every time: the view had to stop, then a
+// whole patch had to come off the network before anything sharpened. These
+// queue tiles ahead of the gesture, at low priority, so by the time you zoom
+// the fetch has already happened.
+
+const WARM_CONCURRENCY = 3;
+const WARM_QUEUE_MAX = 320;
+const warmQueue: string[] = [];
+const warmQueued = new Set<string>();
+let warmActive = 0;
+
+/** Metered connections opt out — imagery you may never look at isn't worth it. */
+function warmingAllowed(): boolean {
+  const conn = (navigator as unknown as {
+    connection?: { saveData?: boolean; effectiveType?: string };
+  }).connection;
+  if (!conn) return true;
+  if (conn.saveData) return false;
+  return conn.effectiveType !== '2g' && conn.effectiveType !== 'slow-2g';
+}
+
+function warmTile(z: number, y: number, x: number): void {
+  if (z < MIN_TILE_ZOOM || z > MAX_TILE_ZOOM) return;
+  const key = tileKey(z, y, x);
+  if (tileCache.has(key) || tileInflight.has(key) || warmQueued.has(key)) return;
+  if (tileFailed.has(key)) return;
+  if (warmQueue.length >= WARM_QUEUE_MAX) return;
+  warmQueued.add(key);
+  warmQueue.push(key);
+  pumpWarm();
+}
+
+function pumpWarm(): void {
+  while (warmActive < WARM_CONCURRENCY) {
+    const key = warmQueue.shift();
+    if (key === undefined) return;
+    warmQueued.delete(key);
+    if (tileCache.has(key) || tileInflight.has(key)) continue;
+    const [z, y, x] = key.split('/').map(Number);
+    warmActive++;
+    void loadTile(z, y, x, 'low')
+      .catch(() => undefined)
+      .then(() => {
+        warmActive--;
+        pumpWarm();
+      });
+  }
+}
+
+/** Drop pending warm work — used when the view jumps somewhere else entirely. */
+function clearWarmQueue(): void {
+  warmQueue.length = 0;
+  warmQueued.clear();
+}
+
+/** Run after the browser is done with more important work (or soon enough). */
+function whenIdle(fn: () => void): void {
+  const ric = (window as unknown as {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  }).requestIdleCallback;
+  if (ric) ric(fn, { timeout: 2500 });
+  else window.setTimeout(fn, 500);
+}
+
+// ── planning ──────────────────────────────────────────────────────────
+
+export interface TileRect {
   z: number;
   colStart: number; // continuous (may be <0 or ≥ nCols; wrapped at fetch time)
   rowStart: number;
   cols: number;
   rows: number;
+}
+
+export interface DetailPlan extends TileRect {
   bounds: PatchBounds;
+}
+
+/** Tile rectangle covering ±half degrees around a centre, at zoom `z`. */
+export function tileRect(
+  z: number,
+  centerLon: number,
+  centerLat: number,
+  halfWdeg: number,
+  halfHdeg: number,
+): TileRect {
+  const tileDeg = 180 / 2 ** z;
+  const nRows = 2 ** z;
+  const rowStart = Math.max(0, Math.floor((90 - (centerLat + halfHdeg)) / tileDeg));
+  const rowEnd = Math.min(nRows - 1, Math.floor((90 - (centerLat - halfHdeg)) / tileDeg));
+  const colStart = Math.floor((centerLon - halfWdeg + 180) / tileDeg);
+  const colEnd = Math.floor((centerLon + halfWdeg + 180) / tileDeg);
+  return { z, colStart, rowStart, cols: colEnd - colStart + 1, rows: rowEnd - rowStart + 1 };
+}
+
+/** Walk a rect's tiles, wrapping columns across the antimeridian. */
+export function eachTile(
+  rect: TileRect,
+  fn: (row: number, col: number, ry: number, cx: number) => void,
+): void {
+  const nCols = 2 ** (rect.z + 1);
+  for (let ry = 0; ry < rect.rows; ry++) {
+    for (let cx = 0; cx < rect.cols; cx++) {
+      const col = (((rect.colStart + cx) % nCols) + nCols) % nCols;
+      fn(rect.rowStart + ry, col, ry, cx);
+    }
+  }
+}
+
+const planKey = (p: TileRect): string =>
+  `${p.z}:${p.colStart}:${p.rowStart}:${p.cols}:${p.rows}`;
+
+/** Queue every tile a plan needs, at background priority. */
+function warmPlan(plan: TileRect): void {
+  eachTile(plan, (row, col) => warmTile(plan.z, row, col));
 }
 
 /**
@@ -321,7 +491,7 @@ interface DetailPlan {
  * `pxPerDeg` is on-screen pixel density at globe center; the patch aims to
  * match or exceed it, capped at MAX_TILE_ZOOM (MapTap+ Pro fidelity).
  */
-function planDetail(
+export function planDetail(
   centerLon: number,
   centerLat: number,
   pxPerDeg: number,
@@ -335,49 +505,148 @@ function planDetail(
   const halfH = Math.min(60, viewHdeg * 0.75);
 
   for (; z >= MIN_TILE_ZOOM; z--) {
+    const rect = tileRect(z, centerLon, centerLat, halfW, halfH);
+    if (rect.cols > MAX_TILES_PER_AXIS || rect.rows > MAX_TILES_PER_AXIS) continue; // zoom out
     const tileDeg = 180 / 2 ** z;
-    const nRows = 2 ** z;
-    const rowStart = Math.max(0, Math.floor((90 - (centerLat + halfH)) / tileDeg));
-    const rowEnd = Math.min(nRows - 1, Math.floor((90 - (centerLat - halfH)) / tileDeg));
-    const colStart = Math.floor((centerLon - halfW + 180) / tileDeg);
-    const colEnd = Math.floor((centerLon + halfW + 180) / tileDeg);
-    const cols = colEnd - colStart + 1;
-    const rows = rowEnd - rowStart + 1;
-    if (cols > MAX_TILES_PER_AXIS || rows > MAX_TILES_PER_AXIS) continue; // zoom out
     return {
-      z,
-      colStart,
-      rowStart,
-      cols,
-      rows,
+      ...rect,
       bounds: {
-        lonMin: colStart * tileDeg - 180,
-        latMax: 90 - rowStart * tileDeg,
-        lonSpan: cols * tileDeg,
-        latSpan: rows * tileDeg,
+        lonMin: rect.colStart * tileDeg - 180,
+        latMax: 90 - rect.rowStart * tileDeg,
+        lonSpan: rect.cols * tileDeg,
+        latSpan: rect.rows * tileDeg,
       },
     };
   }
   return null;
 }
 
-/** Fetch and composite the planned tiles. Rejects if any tile fails. */
-async function buildPatch(plan: DetailPlan): Promise<HTMLCanvasElement> {
-  const nCols = 2 ** (plan.z + 1);
-  const jobs: Promise<{ img: HTMLImageElement; cx: number; ry: number }>[] = [];
-  for (let ry = 0; ry < plan.rows; ry++) {
-    for (let cx = 0; cx < plan.cols; cx++) {
-      const col = (((plan.colStart + cx) % nCols) + nCols) % nCols; // wrap antimeridian
-      const row = plan.rowStart + ry;
-      jobs.push(loadTile(plan.z, row, col).then((img) => ({ img, cx, ry })));
-    }
+// ── patch compositing ─────────────────────────────────────────────────
+
+/** One `drawImage` of the base texture: source longitude run → destination x run. */
+export interface CropSlice {
+  /** Western edge of the run in the source image, degrees in [-180, 180). */
+  srcLon: number;
+  /** Width of the run, degrees. */
+  spanDeg: number;
+  /** Destination x, in patch-canvas pixels. */
+  dx: number;
+  dw: number;
+}
+
+/**
+ * Split a patch's longitude range into runs that don't cross the source
+ * image's seam. A patch may straddle the antimeridian — Fiji, Tuvalu, the
+ * Aleutians — where the sphere wraps but an equirectangular bitmap does not,
+ * so those become two draws off opposite edges of the source.
+ */
+export function baseCropSlices(lonMin: number, lonSpan: number, w: number): CropSlice[] {
+  const slices: CropSlice[] = [];
+  let drawnDeg = 0;
+  while (drawnDeg < lonSpan - 1e-9) {
+    const srcLon = ((((lonMin + drawnDeg + 180) % 360) + 360) % 360) - 180;
+    const spanDeg = Math.min(180 - srcLon, lonSpan - drawnDeg);
+    if (spanDeg <= 0) break;
+    slices.push({
+      srcLon,
+      spanDeg,
+      dx: (drawnDeg / lonSpan) * w,
+      dw: (spanDeg / lonSpan) * w,
+    });
+    drawnDeg += spanDeg;
   }
-  const tiles = await Promise.all(jobs);
+  return slices;
+}
+
+/**
+ * Paint the patch's own region of the blurry base texture, upscaled, as the
+ * canvas's starting content. Tiles then land on top of it. That is what makes
+ * a half-loaded patch read as "sharpening in" instead of punching black holes
+ * in the globe, and it means one dead tile costs you one blurry square rather
+ * than the whole patch.
+ */
+function drawBaseCrop(
+  ctx: CanvasRenderingContext2D,
+  base: HTMLImageElement | null,
+  b: PatchBounds,
+  w: number,
+  h: number,
+): void {
+  if (!base?.naturalWidth) {
+    ctx.fillStyle = '#0b1d33';
+    ctx.fillRect(0, 0, w, h);
+    return;
+  }
+  const pxPerLon = base.naturalWidth / 360;
+  const sy = ((90 - b.latMax) / 180) * base.naturalHeight;
+  const sh = Math.max(1, (b.latSpan / 180) * base.naturalHeight);
+  for (const s of baseCropSlices(b.lonMin, b.lonSpan, w)) {
+    ctx.drawImage(base, (s.srcLon + 180) * pxPerLon, sy, s.spanDeg * pxPerLon, sh, s.dx, 0, s.dw, h);
+  }
+}
+
+function newPatchCanvas(
+  plan: DetailPlan,
+  base: HTMLImageElement | null,
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement('canvas');
   canvas.width = plan.cols * TILE_PX;
   canvas.height = plan.rows * TILE_PX;
   const ctx = canvas.getContext('2d')!;
-  for (const t of tiles) ctx.drawImage(t.img, t.cx * TILE_PX, t.ry * TILE_PX);
+  ctx.imageSmoothingQuality = 'high';
+  drawBaseCrop(ctx, base, plan.bounds, canvas.width, canvas.height);
+  return { canvas, ctx };
+}
+
+/**
+ * Composite a plan from cache alone, or return null if any tile is missing.
+ * This is the path a warmed zoom takes: no network, no settle wait, no fade —
+ * the sharp version is simply there on the next frame.
+ */
+function compositeCached(
+  plan: DetailPlan,
+  base: HTMLImageElement | null,
+): HTMLCanvasElement | null {
+  const have: { img: HTMLImageElement; cx: number; ry: number }[] = [];
+  let complete = true;
+  eachTile(plan, (row, col, ry, cx) => {
+    if (!complete) return;
+    const img = cacheGet(tileKey(plan.z, row, col));
+    if (img) have.push({ img, cx, ry });
+    else complete = false;
+  });
+  if (!complete) return null;
+  const { canvas, ctx } = newPatchCanvas(plan, base);
+  for (const t of have) ctx.drawImage(t.img, t.cx * TILE_PX, t.ry * TILE_PX);
+  return canvas;
+}
+
+/**
+ * Fetch and composite a plan, calling `onProgress` as tiles land so the caller
+ * can show the patch filling in. Resolves once every tile has settled one way
+ * or the other; rejects only if nothing at all arrived.
+ */
+async function buildPatch(
+  plan: DetailPlan,
+  base: HTMLImageElement | null,
+  onProgress?: (canvas: HTMLCanvasElement) => void,
+): Promise<HTMLCanvasElement> {
+  const { canvas, ctx } = newPatchCanvas(plan, base);
+  let landed = 0;
+  const jobs: Promise<void>[] = [];
+  eachTile(plan, (row, col, ry, cx) => {
+    jobs.push(
+      loadTile(plan.z, row, col)
+        .then((img) => {
+          ctx.drawImage(img, cx * TILE_PX, ry * TILE_PX);
+          landed++;
+          onProgress?.(canvas);
+        })
+        .catch(() => undefined), // leave the base crop showing for this tile
+    );
+  });
+  await Promise.all(jobs);
+  if (landed === 0) throw new Error('patch had no tiles');
   return canvas;
 }
 
@@ -406,12 +675,21 @@ export class Globe {
   private detailToken = 0;
   private appliedDetailKey = '';
   private fadeRaf = 0;
+  private warmedAheadKey = '';
+  private warmedViewKey = '';
+  private lastCachedApply = 0;
 
   constructor(
     private container: HTMLElement,
     private callbacks: GlobeCallbacks = {},
   ) {
-    this.sat = new SatelliteLayer(() => this.requestRender());
+    // Warming starts as soon as the base texture is up — the moment the globe
+    // first appears, not the first time someone zooms. Detail tiles are a
+    // WebGL-only concern, so if the layer fails this never runs.
+    this.sat = new SatelliteLayer(() => {
+      this.requestRender();
+      this.warmView();
+    });
     container.appendChild(this.sat.canvas);
 
     this.canvas = document.createElement('canvas');
@@ -439,6 +717,7 @@ export class Globe {
     clearTimeout(this.settleTimer);
     clearTimeout(this.revealTimer);
     this.detailToken++; // invalidate in-flight tile builds
+    clearWarmQueue();
     window.removeEventListener('resize', this.resize);
     this.canvas.remove();
     this.sat.destroy();
@@ -516,7 +795,15 @@ export class Globe {
     const focus = r.guess
       ? geoInterpolate([r.guess.lon, r.guess.lat], [r.target.lon, r.target.lat])(0.5)
       : ([r.target.lon, r.target.lat] as [number, number]);
-    this.animateTo([-focus[0], -focus[1]], this.zoomToFitReveal());
+    const zoom = this.zoomToFitReveal();
+    // Where the framing lands depends on the guess, so it can't be warmed with
+    // the answer at the top of the round — but it can be warmed now, while the
+    // camera is still flying there, instead of after it arrives.
+    if (!this.sat.failed && warmingAllowed()) {
+      const plan = this.planFor(focus[0], focus[1], zoom);
+      if (plan) warmPlan(plan);
+    }
+    this.animateTo([-focus[0], -focus[1]], zoom);
   }
 
   /**
@@ -669,15 +956,150 @@ export class Globe {
     this.sat.canvas.style.height = `${h}px`;
     this.baseScale = Math.min(w, h) / 2 - 12;
     this.projection.translate([w / 2, h / 2]);
+    // Patch plans are sized off the viewport, so a resize invalidates what the
+    // warming passes decided to fetch.
+    this.warmedViewKey = '';
+    this.warmedAheadKey = '';
     this.requestRender();
   };
 
   private requestRender(): void {
     cancelAnimationFrame(this.raf);
     this.raf = requestAnimationFrame(() => this.render());
-    // Re-plan the detail patch once the view stops moving.
+    // Two-speed detail. If the level the view now wants is already warm, swap
+    // it in on this frame — waiting out a settle timer for tiles we are
+    // already holding is most of what made zooming feel a beat behind the
+    // gesture. Only work that still needs the network waits for the view to
+    // stop moving.
+    this.applyCachedDetail();
     clearTimeout(this.settleTimer);
     this.settleTimer = window.setTimeout(() => this.updateDetail(), SETTLE_MS);
+  }
+
+  /** The patch plan for a hypothetical view: same centre, a given zoom. */
+  private planFor(lon: number, lat: number, zoom: number): DetailPlan | null {
+    const scalePx = Math.max(10, this.baseScale * zoom);
+    const pxPerDeg = (scalePx * Math.PI) / 180;
+    if (pxPerDeg <= 0) return null;
+    return planDetail(
+      lon,
+      lat,
+      pxPerDeg * (window.devicePixelRatio || 1),
+      this.container.clientWidth / pxPerDeg,
+      this.container.clientHeight / pxPerDeg,
+    );
+  }
+
+  /**
+   * The widest patch each tile level ever uses at this centre, coarsest first.
+   *
+   * Which level a patch lands on is set by the MAX_TILES_PER_AXIS cap, not by
+   * pixel density — `planDetail` walks the level down until the rect fits — so
+   * a zoom band covers one level, and every plan inside the band is a centred
+   * sub-rect of the plan the band opens with. Warm that opening rect and the
+   * whole band is warm. Swept rather than solved because where the bands fall
+   * depends on viewport shape.
+   */
+  private levelBands(lon: number, lat: number): DetailPlan[] {
+    const bands: DetailPlan[] = [];
+    let deepest = -1;
+    for (let zoom = DETAIL_ZOOM_THRESHOLD; zoom <= MAX_SCALE_FACTOR; zoom *= LEVEL_SWEEP_STEP) {
+      const plan = this.planFor(lon, lat, zoom);
+      if (!plan || plan.z <= deepest) continue;
+      deepest = plan.z;
+      bands.push(plan);
+    }
+    return bands;
+  }
+
+  /**
+   * Queue the tiles a zoom-in from here would want. Cheap and idempotent —
+   * anything cached, in flight or already queued is dropped on the floor. Only
+   * the first band goes out immediately; the next waits for an idle moment so
+   * it never races the base texture or a patch that's actually on screen.
+   */
+  private warmView(): void {
+    if (!warmingAllowed()) return;
+    // Bucket the centre so a drag re-warms on real movement, not every frame.
+    const key = `${Math.round(this.rotation[0] / 5)},${Math.round(this.rotation[1] / 5)}`;
+    if (key === this.warmedViewKey) return;
+    this.warmedViewKey = key;
+    const bands = this.levelBands(-this.rotation[0], -this.rotation[1]);
+    if (bands[0]) warmPlan(bands[0]);
+    whenIdle(() => {
+      if (key !== this.warmedViewKey) return; // view has moved on
+      for (const plan of bands.slice(1, WARM_ENTRY_LEVELS)) warmPlan(plan);
+    });
+  }
+
+  /** Queue the band below the one on screen, so the next pinch is paid for. */
+  private warmAhead(): void {
+    if (!warmingAllowed()) return;
+    const lon = -this.rotation[0];
+    const lat = -this.rotation[1];
+    const here = this.planFor(lon, lat, this.zoom);
+    if (!here) return;
+    const key = planKey(here);
+    if (key === this.warmedAheadKey) return;
+    this.warmedAheadKey = key;
+    // Two bands down, not one: a single flick of a scroll wheel or a pinch
+    // crosses more than one band, and the settle that triggers this only fires
+    // once the gesture is over. Also this band's own full width, since the
+    // rect grows again if you back the zoom off or drag.
+    for (const plan of this.levelBands(lon, lat)) {
+      if (plan.z >= here.z && plan.z <= here.z + WARM_LOOKAHEAD_LEVELS) warmPlan(plan);
+    }
+  }
+
+  /**
+   * Pre-fetch the imagery around a point the view is about to be sent to —
+   * the round's answer, before the reveal flies there. The bands the fly-to
+   * passes through are planned now and fetched during the round, so the zoom
+   * lands sharp instead of spending its first second unblurring.
+   *
+   * No secret leaks: every location's coordinates already ship in the bundle,
+   * and the prompt names the place.
+   */
+  prefetchAround(p: LatLon): void {
+    if (this.sat.failed || !warmingAllowed()) return;
+    clearWarmQueue(); // last round's leftovers are no longer worth the bandwidth
+    this.warmedViewKey = ''; // …but re-warm the view we're actually looking at
+    this.warmedAheadKey = '';
+    const landing = this.planFor(p.lon, p.lat, Math.min(MAX_SCALE_FACTOR, ANSWER_ZOOM));
+    if (!landing) return;
+    // Just the band the fly-to settles in. The framing beat before it sits
+    // wherever the guess put it, which is usually nowhere near, and one band
+    // per round is already a megabyte or two of somebody's data.
+    warmPlan(landing);
+  }
+
+  /**
+   * Swap in a patch that can be built from cache alone. Runs on every render
+   * request, guarded by a short floor so a continuous pinch doesn't re-upload
+   * a 2048² texture every frame.
+   */
+  private applyCachedDetail(): void {
+    if (!this.sat.ready || this.sat.failed) return;
+    if (this.zoom < DETAIL_ZOOM_THRESHOLD) return;
+    const now = performance.now();
+    if (now - this.lastCachedApply < CACHED_APPLY_MS) return;
+    // Charge the throttle for the attempt, not just the hit: a drag fires this
+    // on every frame, and re-planning 60 times a second to find nothing warm
+    // is work nobody sees.
+    this.lastCachedApply = now;
+    const plan = this.planFor(-this.rotation[0], -this.rotation[1], this.zoom);
+    if (!plan) return;
+    const key = planKey(plan);
+    if (key === this.appliedDetailKey) return;
+    const canvas = compositeCached(plan, this.sat.baseImage);
+    if (!canvas) return;
+    this.detailToken++; // any in-flight build is for a view we've moved past
+    this.sat.setPatch(canvas, plan.bounds);
+    this.appliedDetailKey = key;
+    // Refining a patch that's already up should not flicker through a fade;
+    // only the first patch of a zoom-in gets one.
+    if (this.sat.patchAlpha === 0) this.fadePatchIn();
+    else this.requestRenderOnly();
   }
 
   /** Fetch/refresh the Sentinel-2 detail patch for the settled view. */
@@ -689,24 +1111,30 @@ export class Globe {
         this.appliedDetailKey = '';
         this.requestRenderOnly();
       }
+      // Idle at globe scale: line up the first zoom step for wherever the
+      // view is now pointing.
+      this.warmView();
       return;
     }
-    const w = this.container.clientWidth;
-    const h = this.container.clientHeight;
-    const scalePx = this.projection.scale()!;
-    const pxPerDeg = (scalePx * Math.PI) / 180;
-    const plan = planDetail(
-      -this.rotation[0],
-      -this.rotation[1],
-      pxPerDeg * (window.devicePixelRatio || 1),
-      w / pxPerDeg,
-      h / pxPerDeg,
-    );
+    this.warmAhead();
+    const plan = this.planFor(-this.rotation[0], -this.rotation[1], this.zoom);
     if (!plan) return;
-    const key = `${plan.z}:${plan.colStart}:${plan.rowStart}:${plan.cols}:${plan.rows}`;
+    const key = planKey(plan);
     if (key === this.appliedDetailKey) return; // already showing this patch
     const token = ++this.detailToken;
-    void buildPatch(plan)
+    let lastPaint = 0;
+    void buildPatch(plan, this.sat.baseImage, (canvas) => {
+      // Show the patch filling in rather than holding everything back until
+      // the slowest tile of the batch arrives — throttled, since each paint
+      // is a texture upload.
+      if (token !== this.detailToken) return;
+      const now = performance.now();
+      if (now - lastPaint < PATCH_PAINT_MS) return;
+      lastPaint = now;
+      this.sat.setPatch(canvas, plan.bounds);
+      if (this.sat.patchAlpha === 0) this.fadePatchIn();
+      else this.requestRenderOnly();
+    })
       .then((canvas) => {
         if (token !== this.detailToken) return; // stale — view moved on
         this.sat.setPatch(canvas, plan.bounds);
