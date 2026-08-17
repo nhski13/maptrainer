@@ -21,7 +21,7 @@ import { feature, mesh } from 'topojson-client';
 import type { Topology, GeometryCollection } from 'topojson-specification';
 import worldData from 'world-atlas/countries-110m.json';
 import earthUrl from '../assets/earth.jpg';
-import { formatKm, haversineKm, type LatLon } from '../core/geo';
+import { type LatLon } from '../core/geo';
 
 const world = worldData as unknown as Topology<{ countries: GeometryCollection }>;
 const land = feature(world, world.objects.countries);
@@ -38,8 +38,10 @@ interface Reveal {
   guess: LatLon | null;
   target: LatLon;
   targetLabel: string;
-  errorKm: number;
 }
+
+/** How far the finished rounds fade back behind the live one. */
+const TRAIL_ALPHA = 0.42;
 
 const MIN_SCALE_FACTOR = 0.45;
 /** ~2.5° of longitude across the viewport at max — MapTap+ "minDistance" parity. */
@@ -395,6 +397,8 @@ export class Globe {
   private zoom = 1;
   private pin: LatLon | null = null;
   private reveal: Reveal | null = null;
+  /** Rounds already played this session — kept on the globe, dimmed. */
+  private trail: Reveal[] = [];
   private raf = 0;
   private animRaf = 0;
   private pointers = new Map<number, { x: number; y: number }>();
@@ -463,12 +467,7 @@ export class Globe {
    * answer and see exactly what you missed. Only pin-dropping is locked out.
    */
   showReveal(guess: LatLon | null, target: LatLon, targetLabel = ''): void {
-    this.reveal = {
-      guess,
-      target,
-      targetLabel,
-      errorKm: guess ? haversineKm(guess, target) : Infinity,
-    };
+    this.reveal = { guess, target, targetLabel };
     this.pin = null;
 
     // Two beats, because the reveal has two things to say. First frame both
@@ -539,10 +538,22 @@ export class Globe {
     return Math.max(MIN_SCALE_FACTOR, Math.min(MAX_SCALE_FACTOR, fit));
   }
 
+  /**
+   * Retire the live reveal into the trail. The round's tap and answer stay on
+   * the globe, dimmed, for the rest of the session — by round five you can see
+   * the whole run at once, which is where the pattern in your misses shows up.
+   */
   clearReveal(): void {
     clearTimeout(this.revealTimer);
     cancelAnimationFrame(this.dropRaf);
+    if (this.reveal) this.trail.push(this.reveal);
     this.reveal = null;
+    this.requestRender();
+  }
+
+  /** Wipe the session's accumulated rounds. */
+  clearTrail(): void {
+    this.trail = [];
     this.requestRender();
   }
 
@@ -813,12 +824,45 @@ export class Globe {
     ctx.lineWidth = 1.2;
     ctx.stroke();
 
+    if (this.trail.length) this.renderTrail(path, c);
     if (this.reveal) this.renderReveal(path);
     else if (this.pin) this.drawMarker(this.pin, c('--pin', '#ffb545'));
   }
 
+  /** Past rounds, drawn faint and unlabelled so the live round still leads. */
+  private renderTrail(
+    path: ReturnType<typeof geoPath>,
+    c: (name: string, fallback: string) => string,
+  ): void {
+    const ctx = this.ctx;
+    const pinColor = c('--pin', '#ffb545');
+    const targetColor = c('--target', '#3ddc84');
+    for (const r of this.trail) {
+      if (r.guess) {
+        ctx.save();
+        ctx.globalAlpha = TRAIL_ALPHA * 0.7;
+        ctx.beginPath();
+        path({
+          type: 'LineString',
+          coordinates: [
+            [r.guess.lon, r.guess.lat],
+            [r.target.lon, r.target.lat],
+          ],
+        });
+        ctx.strokeStyle = c('--reveal-line', 'rgba(255,181,69,0.9)');
+        ctx.lineWidth = 1.4;
+        ctx.setLineDash([5, 6]);
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        ctx.restore();
+        this.drawMarker(r.guess, pinColor, false, 0, TRAIL_ALPHA, 3.5);
+      }
+      this.drawMarker(r.target, targetColor, false, 0, TRAIL_ALPHA, 3.5);
+    }
+  }
+
   private renderReveal(path: ReturnType<typeof geoPath>): void {
-    const { guess, target, targetLabel, errorKm } = this.reveal!;
+    const { guess, target, targetLabel } = this.reveal!;
     const ctx = this.ctx;
     const styles = getComputedStyle(document.documentElement);
     const c = (name: string, fallback: string): string =>
@@ -862,17 +906,6 @@ export class Globe {
     if (targetLabel) {
       this.drawLabel(target, targetLabel, c('--target', '#3ddc84'), dropPx, drop);
     }
-
-    // Distance chip, pinned to the middle of the geodesic — the answer to
-    // "how badly did I miss?" sits on the line that shows the miss.
-    if (guess && Number.isFinite(errorKm)) {
-      const mid = geoInterpolate([guess.lon, guess.lat], [target.lon, target.lat])(0.5);
-      const midPoint = { lon: mid[0], lat: mid[1] };
-      if (this.isVisible(midPoint)) {
-        const pt = this.projection([mid[0], mid[1]]);
-        if (pt) this.drawChip(pt[0], pt[1], formatKm(errorKm), lineColor, true);
-      }
-    }
   }
 
   private drawMarker(
@@ -881,6 +914,7 @@ export class Globe {
     ring = false,
     dy = 0,
     alpha = 1,
+    radius = 5,
   ): void {
     if (!this.isVisible(p)) return;
     const pt = this.projection([p.lon, p.lat]);
@@ -889,7 +923,7 @@ export class Globe {
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.arc(pt[0], pt[1] + dy, 5, 0, Math.PI * 2);
+    ctx.arc(pt[0], pt[1] + dy, radius, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
     ctx.lineWidth = 2;
@@ -898,7 +932,7 @@ export class Globe {
     if (ring) {
       // Landed ring expands out of the dot as the drop finishes.
       ctx.beginPath();
-      ctx.arc(pt[0], pt[1] + dy, 6 + 4 * alpha, 0, Math.PI * 2);
+      ctx.arc(pt[0], pt[1] + dy, radius + 1 + 4 * alpha, 0, Math.PI * 2);
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
       ctx.stroke();

@@ -320,6 +320,43 @@ h2 {
   display: none;
 }
 
+/* Takes a whole row of the wrapping HUD strip, so it always lands cleanly
+   under the prompt however that strip has broken — but only the pill inside
+   it is drawn, and only the pill catches taps. */
+.toast {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: center;
+  margin-top: 2px;
+  animation: toast-in 220ms ease-out;
+}
+
+.toast span {
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--bad);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
 .hud-meta {
   display: flex;
   gap: 14px;
@@ -355,6 +392,12 @@ h2 {
 
 .multiplier.hot {
   color: var(--accent-2);
+}
+
+/* display:flex would otherwise beat the UA's [hidden] rule, and the reveal
+   hides this bar by attribute. */
+.hud-bottom[hidden] {
+  display: none;
 }
 
 .hud-bottom {
@@ -406,118 +449,83 @@ h2 {
   color: var(--ink-3);
 }
 
-/* reveal card */
-.reveal-card {
+/* ── the reveal ─────────────────────────────────────────
+   MapTap sets its result straight onto the globe as text, and it costs the
+   map almost nothing. Same here: a full-bleed layer that lets taps through,
+   the readout in the bottom-left corner, one button centred at the bottom. */
+.reveal-overlay {
   position: absolute;
-  bottom: calc(18px + env(safe-area-inset-bottom));
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  padding: 16px 24px;
-  text-align: center;
+  inset: 0;
   z-index: 4;
-  backdrop-filter: blur(8px);
-  min-width: 300px;
-  max-width: min(420px, calc(100vw - 20px));
-  /* the card owns its own gestures — swipe down tucks it away */
+  pointer-events: none;
+}
+
+.reveal-overlay > * {
+  pointer-events: auto;
+}
+
+.reveal-info {
+  position: absolute;
+  left: 16px;
+  bottom: calc(74px + env(safe-area-inset-bottom));
+  max-width: min(360px, calc(100vw - 32px));
+  text-align: left;
+  /* no panel behind it, so the type carries its own legibility */
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 12px rgba(0, 0, 0, 0.8);
+  /* it owns its own gestures — swipe down tucks it away */
   touch-action: none;
 }
 
-/* Tucked away: the panel chrome goes with it, leaving two floating pills. */
-.reveal-card.collapsed {
-  padding: 0;
-  min-width: 0;
-  background: none;
-  border-color: transparent;
-  backdrop-filter: none;
-}
-
-.reveal-card.collapsed .reveal-body,
-.reveal-card.collapsed .reveal-dismiss,
-.reveal-card:not(.collapsed) .reveal-peek {
+.reveal-overlay.collapsed .reveal-info,
+.reveal-overlay:not(.collapsed) .reveal-peek {
   display: none;
 }
 
-.reveal-dismiss {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
+.reveal-miss {
   font-size: 13px;
-  line-height: 1;
-  color: var(--ink-3);
+  color: var(--ink-2);
+  margin-top: 1px;
 }
 
-.reveal-dismiss:hover {
-  color: var(--ink);
-  background: rgba(120, 170, 255, 0.12);
+/* Tucked away: just the number, where the readout was. */
+.reveal-peek {
+  position: absolute;
+  left: 16px;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  font-size: 22px;
+  font-weight: 800;
+  padding: 4px 6px;
+  margin-left: -6px;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 12px rgba(0, 0, 0, 0.8);
 }
 
 .reveal-footer {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  margin-top: 10px;
-}
-
-.reveal-card.collapsed .reveal-footer {
-  margin-top: 0;
-}
-
-/* The collapsed score chip — tap it to bring the full card back. */
-.reveal-peek {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
-  font-size: 19px;
-  font-weight: 800;
-  padding: 10px 16px;
-  border-radius: 999px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  backdrop-filter: blur(8px);
-}
-
-.reveal-peek span {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ink-3);
-}
-
-/* score × multiplier, set small beside the points total */
-.reveal-math {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  color: var(--ink-3);
-}
-
-.reveal-hint {
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--ink-3);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(18px + env(safe-area-inset-bottom));
 }
 
 .reveal-actions {
   display: flex;
-  gap: 8px;
-  justify-content: center;
-  margin-top: 10px;
-}
-
-.reveal-actions {
   flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
 }
 
 .reveal-actions .btn {
-  padding: 10px 16px;
-  font-size: 14px;
+  padding: 7px 13px;
+  font-size: 13px;
+  text-shadow: none;
+}
+
+.reveal-actions .reveal-dismiss {
+  padding: 7px 11px;
+  color: var(--ink-3);
 }
 
 /* Points total on the results hero, MapTap-style: 645/1000 */
@@ -552,38 +560,64 @@ h2 {
   font-weight: 800;
 }
 
+/* "Score 96 ×2 · 192 pts" — the number leads, the arithmetic trails it. */
 .reveal-score {
-  font-size: 34px;
-  font-weight: 800;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin-top: 2px;
 }
 
-.reveal-score.good,
+.reveal-score strong {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+
+.reveal-score em {
+  font-style: normal;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.reveal-score span {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-3);
+}
+
+.reveal-score.good strong,
+.reveal-score.good em,
 .reveal-peek.good {
   color: var(--good);
 }
 
-.reveal-score.mid,
+.reveal-score.mid strong,
+.reveal-score.mid em,
 .reveal-peek.mid {
   color: var(--accent-2);
 }
 
-.reveal-score.bad,
+.reveal-score.bad strong,
+.reveal-score.bad em,
 .reveal-peek.bad {
   color: var(--bad);
-}
-
-.reveal-detail {
-  color: var(--ink-2);
-  font-size: 14px;
-  margin: 4px 0 2px;
 }
 
 .reveal-quip {
   color: var(--accent-2);
   font-size: 13px;
   font-style: italic;
-  margin: 2px 0 12px;
-  max-width: 340px;
+  margin-top: 3px;
 }
 
 .result-quip {

@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.7.0 — 2026-08-17
+
+- **The reveal is text on the globe now, not a panel over it.** MapTap sets its
+  result straight onto the map and it costs the view almost nothing; copied.
+  The score, the multiplier and the quip sit in the bottom-left corner over a
+  text shadow, **Next Round** is alone at the bottom, and the location isn't
+  repeated — the prompt chip is still up top saying it.
+- **The score is just the number.** No `+` in front of it, and no distance
+  anywhere in the reveal: the kilometre chip that hung off the middle of the
+  geodesic is gone too. Distances still back the stats — average miss per
+  location is what the weak-spot engine ranks on — they're just not in your
+  face mid-round.
+- **The running total goes live the moment you lock in**, instead of waiting
+  for the next round to start. MapTap's corner score does the same.
+- **Wrong country gets called out.** A tap that lands in a different country
+  from the answer raises a toast — *"This is Turkmenistan"* — under the prompt.
+  The check runs against the same 110m Natural Earth outlines the globe draws
+  and compares polygon ids, not names, so the "United States" / "United States
+  of America" class of spelling difference can't produce a false accusation;
+  microstates without an outline at that resolution stay silent rather than
+  guess. Quips that credit you with the right country are held back on those
+  rounds — *"right country energy"* under *"This is Libya"* reads like the app
+  isn't paying attention.
+- **Rounds accumulate on the globe.** Each finished tap and answer stays put,
+  dimmed, for the rest of the session. Zoom out on round five and the whole run
+  is there at once.
+- Fixed: the **Reset view** / **Lock In** bar was only *visually* covered
+  during a reveal, never actually hidden — `display: flex` was quietly beating
+  the `hidden` attribute. The lighter reveal made it obvious.
+
 ## 1.6.1 — 2026-08-17
 
 - **The score card can be dismissed.** It sits at the bottom of the globe, which

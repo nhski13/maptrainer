@@ -79,19 +79,29 @@ blowing a ×3 round costs you a grade.
 
 The reveal plays in two beats, because it has two things to say. First the
 globe frames your tap *and* the answer together, with a dashed geodesic between
-them, both ends labelled, and the error distance hung on the middle of the
-line — that's how far off you were. Then it flies over to the answer and zooms
-to city scale, dropping the pin as it lands — that's where it actually was.
+them and both ends labelled — that's how far off you were. Then it flies over to
+the answer and zooms to city scale, dropping the pin as it lands — that's where
+it actually was.
 
 The globe stays live throughout: grab it at any point and the flight cancels
 rather than fighting you, so you can drag, pinch and scroll all the way down to
 Sentinel-2 detail. **Frame both** and **Zoom to answer** replay either beat.
 
-The score card gets out of the way when you want the map instead. Tap the globe,
-swipe the card down, hit the **✕**, or press **Esc**, and it folds to a slim bar
-holding your points and **Next Round** — tap the points chip to bring the full
-card back. On a phone that's the difference between seeing the answer and seeing
-a panel where the answer was. The choice sticks for the rest of the session.
+The score is set as plain text over the globe, MapTap-style, rather than in a
+panel — on a phone a panel at the bottom of the screen lands squarely on the
+answer the reveal just flew to. It gets out of the way entirely on a tap of the
+globe, a swipe down, **Esc**, or the **✕**, leaving just the number; tap that to
+bring it back. The choice sticks for the rest of the session.
+
+Tap in the wrong country and the reveal says which one you actually hit. That
+comes from the same 110m outlines the globe draws, matched polygon-to-polygon
+rather than by name, so a spelling difference between our list and Natural
+Earth can never fake a wrong-country call. Countries too small to have an
+outline at that resolution — Singapore, Malta, Monaco — simply say nothing.
+
+Rounds accumulate. Every tap and answer stays on the globe, dimmed, for the
+rest of the session, so by round five you can zoom out and see the whole run at
+once — which is where the pattern in your misses actually shows up.
 
 ## Strategy notes (from the trenches)
 
