@@ -22,6 +22,7 @@ import {
   type Session,
   type RoundResult,
 } from './core/game';
+import { misplacedCountry } from './core/countries';
 import { pickWeighted, updateStat, weakestLocations, type StatsMap } from './core/srs';
 import {
   loadStats,
@@ -47,6 +48,15 @@ let globe: Globe | null = null;
 let timerHandle = 0;
 let timerEndsAt = 0;
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
+// The reveal card sits on top of the globe, which is exactly the thing you
+// want to look at once the answer drops. It can be tucked away to a slim bar,
+// and the choice sticks for the rest of the session — nobody wants to dismiss
+// the same card five rounds running.
+let revealCollapsed = false;
+let collapseReveal: (() => void) | null = null;
+
+/** How long a toast sits on screen before it takes itself away. */
+const TOAST_MS = 4200;
 
 const MODES: { id: ModeId; name: string; desc: string; tag: string }[] = [
   {
@@ -92,6 +102,7 @@ function teardownGame(): void {
   clearInterval(timerHandle);
   globe?.destroy();
   globe = null;
+  collapseReveal = null;
   if (keyHandler) {
     window.removeEventListener('keydown', keyHandler);
     keyHandler = null;
@@ -205,6 +216,7 @@ function startGame(mode: ModeId): void {
   const queue = buildQueue(mode);
   if (queue.length === 0) return;
   session = createSession(mode, queue);
+  revealCollapsed = false;
 
   const screen = el(`
     <div class="screen game">
@@ -241,12 +253,18 @@ function startGame(mode: ModeId): void {
     onPin: () => {
       lockBtn.disabled = false;
     },
+    // Tapping the globe during a reveal means "let me look" — get out of the way.
+    onRevealTap: () => collapseReveal?.(),
   });
 
   screen.querySelector('.reset-view')!.addEventListener('click', () => globe?.resetView());
   lockBtn.addEventListener('click', () => lockIn(screen));
 
   keyHandler = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      collapseReveal?.();
+      return;
+    }
     if (e.key === 'Enter') {
       const next = document.querySelector<HTMLButtonElement>('.reveal-next');
       if (next) next.click();
@@ -265,6 +283,7 @@ function beginRound(screen: HTMLElement): void {
 
   globe.clearReveal();
   globe.setPin(null);
+  screen.querySelector('.toast')?.remove();
   screen.querySelector<HTMLButtonElement>('.lock-in')!.disabled = true;
 
   const askByCountry =
@@ -289,10 +308,7 @@ function beginRound(screen: HTMLElement): void {
   multEl.textContent = difficulty ? `${difficulty} ×${mult}` : '';
   multEl.classList.toggle('hot', mult >= 3);
 
-  const cap = maxPoints(session);
-  screen.querySelector('.score-so-far')!.innerHTML = session.mode === 'survival'
-    ? `Score <strong>${totalPoints(session)}</strong>`
-    : `Score <strong>${totalPoints(session)}</strong>/${cap}`;
+  renderScoreSoFar(screen);
 
   const livesEl = screen.querySelector<HTMLElement>('.lives')!;
   if (session.mode === 'survival') {
@@ -346,45 +362,121 @@ function lockIn(screen: HTMLElement): void {
     { lat: result.location.lat, lon: result.location.lon },
     result.location.name,
   );
-  showRevealCard(screen, result);
+
+  // Landing in the wrong country is a different mistake from missing by a
+  // margin, and it's the one worth naming out loud.
+  const wrong = misplacedCountry(guess, {
+    lat: result.location.lat,
+    lon: result.location.lon,
+  });
+  showRevealCard(screen, result, wrong !== null);
+  renderScoreSoFar(screen);
   sfxForScore(result.score);
+  if (wrong) showToast(screen, `This is ${wrong}`);
 }
 
-function showRevealCard(screen: HTMLElement, r: RoundResult): void {
+/** Running points total in the HUD, MapTap-style — live from the moment you lock in. */
+function renderScoreSoFar(screen: HTMLElement): void {
+  if (!session) return;
+  screen.querySelector('.score-so-far')!.innerHTML =
+    session.mode === 'survival'
+      ? `Score <strong>${totalPoints(session)}</strong>`
+      : `Score <strong>${totalPoints(session)}</strong>/${maxPoints(session)}`;
+}
+
+/** Brief note under the HUD. Tap to dismiss; otherwise it fades itself out. */
+function showToast(screen: HTMLElement, text: string): void {
+  screen.querySelector('.toast')?.remove();
+  const toast = el(`<div class="toast"><span>${esc(text)}</span></div>`);
+  toast.addEventListener('click', () => toast.remove());
+  screen.querySelector('.hud-top')!.appendChild(toast);
+  window.setTimeout(() => toast.remove(), TOAST_MS);
+}
+
+function showRevealCard(screen: HTMLElement, r: RoundResult, wrongCountry = false): void {
   screen.querySelector('.hud-bottom')?.setAttribute('hidden', '');
   const cls = r.score >= 80 ? 'good' : r.score >= 40 ? 'mid' : 'bad';
-  const detail = r.guess
-    ? `${formatDistance(r.errorKm)} from ${esc(r.location.name)}`
-    : `Time's up — no pin placed`;
   const isOver = session!.finished;
-  const quip = pickQuip(r.score, !r.guess);
-  // With a multiplier in play, the raw score and the points are different
-  // numbers and both matter — show the arithmetic rather than one or other.
+  const quip = pickQuip(r.score, !r.guess, Math.random, wrongCountry);
+  // MapTap's own reveal is a few lines of text laid straight over the globe —
+  // no panel, nothing boxed in. It reads fine and it hides nothing, so the
+  // score lives as text now too. The location isn't repeated here: the prompt
+  // chip is still up top saying it. With a multiplier in play the raw score
+  // and the points are different numbers and both matter, so show both.
   const scoreLine =
     r.multiplier > 1
-      ? `+${r.points}<span class="reveal-math">${r.score} × ${r.multiplier}</span>`
-      : `+${r.points}`;
+      ? `Score <strong>${r.score}</strong><em>×${r.multiplier}</em><span>${r.points} pts</span>`
+      : `Score <strong>${r.score}</strong>`;
   const card = el(`
-    <div class="reveal-card">
-      <div class="reveal-score ${cls}">${scoreLine}</div>
-      <div class="reveal-detail">${detail}</div>
-      <div class="reveal-quip">${esc(quip)}</div>
-      <div class="reveal-hint">Drag, pinch or scroll to inspect the answer</div>
-      <div class="reveal-actions">
-        <button class="btn ghost reveal-frame">Frame both</button>
-        <button class="btn ghost reveal-zoom">Zoom to answer</button>
+    <div class="reveal-overlay${revealCollapsed ? ' collapsed' : ''}">
+      <div class="reveal-info">
+        <div class="reveal-score ${cls}">${scoreLine}</div>
+        ${r.guess ? '' : `<div class="reveal-miss">Time's up — no pin placed</div>`}
+        <div class="reveal-quip">${esc(quip)}</div>
+        <div class="reveal-actions">
+          <button class="btn ghost reveal-frame">Frame both</button>
+          <button class="btn ghost reveal-zoom">Zoom to answer</button>
+          <button class="btn ghost reveal-dismiss" title="Hide (Esc)" aria-label="Hide the score">✕</button>
+        </div>
+      </div>
+      <button class="reveal-peek ${cls}" aria-label="Show the score">${r.score}</button>
+      <div class="reveal-footer">
         <button class="btn primary reveal-next">${isOver ? 'See Results' : 'Next Round'}</button>
       </div>
     </div>
   `);
+
+  const setCollapsed = (v: boolean): void => {
+    revealCollapsed = v;
+    card.classList.toggle('collapsed', v);
+  };
+  collapseReveal = () => setCollapsed(true);
+
+  card.querySelector('.reveal-dismiss')!.addEventListener('click', () => setCollapsed(true));
+  card.querySelector('.reveal-peek')!.addEventListener('click', () => setCollapsed(false));
   card.querySelector('.reveal-frame')!.addEventListener('click', () => globe?.frameReveal());
   card.querySelector('.reveal-zoom')!.addEventListener('click', () => globe?.flyToAnswer());
   card.querySelector('.reveal-next')!.addEventListener('click', () => {
+    collapseReveal = null;
     card.remove();
     screen.querySelector('.hud-bottom')?.removeAttribute('hidden');
     if (isOver) finishSession();
     else beginRound(screen);
   });
+
+  // Swipe the score down to tuck it away — the gesture a phone user reaches
+  // for before they go hunting for a close button.
+  const info = card.querySelector<HTMLElement>('.reveal-info')!;
+  let swipeFromY: number | null = null;
+  let swiped = false;
+  info.addEventListener('pointerdown', (e) => {
+    swiped = false;
+    swipeFromY = e.clientY;
+  });
+  info.addEventListener('pointercancel', () => {
+    swipeFromY = null;
+  });
+  info.addEventListener('pointerup', (e) => {
+    if (swipeFromY === null) return;
+    const dy = e.clientY - swipeFromY;
+    swipeFromY = null;
+    if (dy > 40) {
+      swiped = true;
+      setCollapsed(true);
+    }
+  });
+  // A swipe that ends over a button still fires a click; swallow that one.
+  info.addEventListener(
+    'click',
+    (e) => {
+      if (!swiped) return;
+      swiped = false;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
+
   screen.appendChild(card);
 }
 

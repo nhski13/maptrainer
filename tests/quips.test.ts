@@ -41,4 +41,20 @@ describe('pickQuip', () => {
   it('uses the timeout pool when no pin was placed', () => {
     expect(TIMEOUT_QUIPS).toContain(pickQuip(0, true, () => 0));
   });
+
+  it('never credits the right country when the tap was in the wrong one', () => {
+    // Sweep the whole pool for each tier the reveal can hit.
+    for (const score of [100, 85, 55, 20, 0]) {
+      for (let i = 0; i < 20; i++) {
+        const quip = pickQuip(score, false, () => i / 20, true);
+        expect(quip, `score ${score}`).not.toMatch(/right (country|neighborhood)/i);
+      }
+    }
+  });
+
+  it('still leaves every tier something to say', () => {
+    for (const score of [100, 85, 55, 20, 0]) {
+      expect(pickQuip(score, false, () => 0, true)).toBeTruthy();
+    }
+  });
 });

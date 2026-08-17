@@ -75,8 +75,25 @@ export const GRADE_QUIPS: Record<string, string> = {
   F: 'F. We don’t geoshame, but the scoreboard does.',
 };
 
-export function pickQuip(score: number, timedOut: boolean, rng: () => number = Math.random): string {
+/**
+ * Lines that credit you with the right country. Harmless most of the time, but
+ * the reveal now says out loud when a tap landed in the wrong one, and "right
+ * country energy" directly under "This is Libya" makes the app look like it
+ * isn't paying attention.
+ */
+const CLAIMS_RIGHT_COUNTRY = new Set([
+  'Right country energy, wrong city execution.',
+  'Right neighborhood. Wrong street. Still bragging rights.',
+]);
+
+export function pickQuip(
+  score: number,
+  timedOut: boolean,
+  rng: () => number = Math.random,
+  wrongCountry = false,
+): string {
   if (timedOut) return TIMEOUT_QUIPS[Math.floor(rng() * TIMEOUT_QUIPS.length)];
-  const pool = QUIPS[tierForScore(score)];
+  const tier = QUIPS[tierForScore(score)];
+  const pool = wrongCountry ? tier.filter((q) => !CLAIMS_RIGHT_COUNTRY.has(q)) : tier;
   return pool[Math.floor(rng() * pool.length)];
 }
