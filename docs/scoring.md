@@ -27,8 +27,11 @@ per-round scores *and* the posted total for every game.
 time of writing. It is strong evidence for *structural* facts that a small
 sample still pins down exactly — the multiplier ladder below — and weak
 evidence for anything distributional, because scoring may have changed since
-and twelve people are not the player base. That makes the multiplier ladder solvable — it is the integer vector
-`m` satisfying `Σ mᵢ·scoreᵢ = total` across every game at once.
+and twelve people are not the player base.
+
+Recording both the per-round scores and the posted total is what makes the
+multiplier ladder solvable: it is the integer vector `m` satisfying
+`Σ mᵢ·scoreᵢ = total` across every game at once.
 
 Searching all 4⁵ candidate vectors over the 434 complete games where every
 round score is a valid 0–100:
@@ -73,7 +76,7 @@ raised to a power — one free parameter:
 score(d) = 100 · (1 − d / 20,015 km) ^ 2.6
 ```
 
-**Why 2.6.** Solve each anchor for `k` on its own and the two current-build
+**Why 2.6.** Solve each anchor for `k` on its own and the two same-screen
 rounds land on 2.572 and 2.662 — agreement to within 0.09, from two rounds
 thousands of km apart. The window of `k` that rounds *both* to their reported
 scores is **2.586–2.613**, and 2.6 sits mid-window. One parameter, two exact
@@ -119,8 +122,8 @@ Two things fall out of the form rather than being bolted on:
   its distance, is the single most valuable missing data point.**
 
 **Honest status: the ladder is measured and confirmed; the curve rests on two
-consistent measured points plus one older outlier.** `SCORE_EXPONENT` is the
-only constant that moves if more rounds turn up.
+consistent measured points, with a third unexplained outlier it does not fit.**
+`SCORE_EXPONENT` is the only constant that moves if more rounds turn up.
 
 ### For reference: the score distribution
 
@@ -182,4 +185,4 @@ one tier-3, so the ×3 rounds are the ones actually worth ×3.
   iMessage share texts
 - Measured (distance, score) rounds and the `Round: 3 (medium - points
   doubled)` label — in-game reveal screenshots supplied by the user,
-  2026-08-16 (MapTap #786 and one older build)
+  2026-08-16 (MapTap #786, plus one round shown on a different-looking screen)
