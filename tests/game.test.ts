@@ -11,6 +11,7 @@ import {
   averageScore,
   multiplierFor,
   currentMultiplier,
+  plannedRounds,
   survivalTimeForRound,
   DAILY_MULTIPLIERS,
   DAILY_MAX_POINTS,
@@ -171,5 +172,34 @@ describe('MapTap round multipliers', () => {
     expect(r.multiplier).toBe(1);
     expect(r.points).toBe(r.score);
     expect(maxPoints(s)).toBe(100); // open-ended: only the rounds played count
+  });
+});
+
+describe('country session', () => {
+  // A country run is as long as the pack it was built from — 25 cities for
+  // India, 10 for a thinner country — rather than a fixed round count.
+  it('runs exactly as many rounds as the queue has', () => {
+    const s = createSession('country', QUEUE.slice(0, 3));
+    expect(plannedRounds(s)).toBe(3);
+    for (let i = 0; i < 3; i++) {
+      const loc = currentLocation(s)!;
+      expect(s.finished).toBe(false);
+      commitGuess(s, { lat: loc.lat, lon: loc.lon });
+    }
+    expect(s.finished).toBe(true);
+    expect(currentLocation(s)).toBeNull();
+  });
+
+  it('is untimed and flat-scored', () => {
+    const s = createSession('country', QUEUE);
+    expect(timeLimitFor(s)).toBeNull();
+    expect(currentMultiplier(s)).toBe(1);
+    expect(maxPoints(s)).toBe(500); // five cities, no multiplier ladder
+  });
+
+  it('does not run past a queue longer than any fixed round count', () => {
+    const long = Array.from({ length: 26 }, (_, i) => mk(`c${i}`, i, i));
+    const s = createSession('country', long);
+    expect(plannedRounds(s)).toBe(26);
   });
 });

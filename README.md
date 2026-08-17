@@ -16,10 +16,53 @@ have: a **spaced-repetition engine that targets your weak spots**.
 | **Blitz** | 5 rounds, 20 s each | Versus / Gauntlet matches |
 | **Survival** | Endless, shrinking clock (20 s → 6 s), 3 lives | Frontier survival runs |
 | **Drill** | 10 rounds on a focused pool | Targeted weak-spot grinding |
+| **By Country** | One country's top 25 cities, quizzed or studied | Learning a country properly |
 
 Drill pools: World Capitals (asked as *"Find the capital of X"* to train
 recall), Major Cities, US State Capitals, each continent, Deep Cuts (tier-3
 obscurities), and Micronations & Tiny Targets.
+
+## Training by country
+
+Pick India and you get its 25 biggest cities, most populous first — the run
+ramps from Mumbai to Visakhapatnam instead of shuffling the two together.
+**Top 10** trims it to a quick session, and the capital is never trimmed away.
+120 countries have packs; the thinner ones run 10–20 cities rather than 25.
+
+**Study mode** is the other half, because quizzing yourself on something you've
+never seen isn't learning. Toggle it and the whole pack lands on the globe at
+once — every city dotted and labelled, the country framed to fit, the list
+beside it. Tap a city and the globe flies there and zooms to street scale;
+arrow keys walk the list. Labels go down biggest-city-first and any that would
+collide is dropped, so zooming in is what brings the rest back. Nothing is
+scored, nothing is timed, and *Quiz me on these* is one tap away.
+
+Country packs reuse the curated corpus rather than duplicating it — India's
+pack points at the same `mumbai` entry every other mode uses, so a city's
+history is one history no matter where you meet it.
+
+### Where the cities come from
+
+Two open gazetteers, and a city only ships if both agree:
+
+- **[SimpleMaps World Cities Basic](https://simplemaps.com/data/world-cities)**
+  (CC BY 4.0) — coordinates, country and population. Measured against this
+  repo's hand-curated corpus, its coordinates land a mean 2.7 km from ours.
+- **[GeoNames](https://www.geonames.org/)** (CC BY 4.0) — confirmation and
+  names. A candidate ships only if GeoNames also puts a settlement there, of
+  the same name or of comparable size, within 25 km.
+
+The cross-check earns its keep. Gazetteer population figures are sometimes
+district totals pinned to a village that happens to share the city's name — one
+such record would have taught Gorakhpur 811 km from Gorakhpur. Names come from
+GeoNames because SimpleMaps carries typos and pre-rename spellings (*Shenyeng*,
+*Nasik*, *Ft. Worth*); transliteration marks are stripped from them, so you get
+Surat rather than Sūrat while São Paulo and Zürich keep their accents. Cities
+within 25 km of a higher-ranked one are folded away — closer than the scoring
+bullseye is not a separate question.
+
+Regenerate with `node scripts/build-country-packs.mjs` (see the script header
+for the three packages it wants).
 
 ## The weak-spot engine
 
@@ -106,7 +149,7 @@ Sentinel-2 detail. **Frame both** and **Zoom to answer** replay either beat.
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # vitest suite (57 tests)
+npm test         # vitest suite (92 tests)
 npm run build    # typecheck + production build
 ```
 
@@ -133,7 +176,9 @@ src/
   core/srs.ts       spaced-repetition weighting + weighted sampling
   core/game.ts      session state machine + MapTap round multipliers
   core/storage.ts   localStorage stats, history, streaks
-  data/locations.ts 300 locations: 194 capitals, 56 cities, 50 US states
+  data/locations.ts 300 curated locations: capitals, major cities, US states
+  data/cities.ts    generated country packs: 120 countries, 2,330 more cities
+  data/countries.ts pack resolution, country search
   data/drills.ts    drill pool definitions
   globe/globe.ts    canvas globe: drag-rotate, pinch/scroll zoom, tap-to-pin
   main.ts           screens, HUD, timers, game loop

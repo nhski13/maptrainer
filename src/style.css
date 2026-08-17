@@ -743,7 +743,253 @@ table.weak-table {
   text-align: center;
 }
 
+/* ── country training ───────────────────────────────── */
+.back-link {
+  color: var(--ink-3);
+  font-size: 13px;
+  margin-bottom: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.back-link:hover {
+  color: var(--ink);
+}
+
+.country-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.country-search {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 12px 16px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+}
+
+.country-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.country-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.country-btn {
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 10px 13px;
+}
+
+.country-btn:hover {
+  border-color: var(--accent);
+}
+
+.country-btn .c-name {
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.country-btn .c-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* Quiz ⇄ Study toggle */
+.seg {
+  display: inline-flex;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  padding: 3px;
+  pointer-events: auto;
+}
+
+.seg-btn {
+  border: none;
+  background: none;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 999px;
+}
+
+.seg-btn.on {
+  background: var(--accent);
+  color: #08131f;
+}
+
+/* ── study screen ───────────────────────────────────── */
+.study-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  padding: 6px 8px 6px 14px;
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  max-width: 100%;
+}
+
+.study-head .back-link {
+  margin: 0;
+  font-size: 16px;
+}
+
+.study-title {
+  font-weight: 700;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.study-title span {
+  margin-left: 8px;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* The list sits over the globe rather than beside it: the globe is the
+   lesson, the list is the index into it. */
+.study-panel {
+  position: absolute;
+  right: 10px;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  width: 260px;
+  max-height: min(62vh, 520px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  padding: 10px;
+  backdrop-filter: blur(8px);
+  z-index: 4;
+}
+
+/* The panel owns the bottom-right corner, so the credit moves out from under
+   it rather than sitting behind the city list. */
+.study .attribution {
+  right: auto;
+  left: 10px;
+}
+
+.study-hint {
+  font-size: 10px;
+  color: var(--ink-3);
+  padding: 0 4px 8px;
+  text-align: center;
+}
+
+.study-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.study-row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 9px;
+  background: none;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.study-row:hover {
+  background: rgba(120, 170, 255, 0.1);
+  color: var(--ink);
+}
+
+.study-row.on {
+  background: var(--accent);
+  color: #08131f;
+  font-weight: 700;
+}
+
+.study-row .s-rank {
+  flex: none;
+  width: 18px;
+  font-size: 11px;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+.study-row.on .s-rank,
+.study-row.on .s-skill {
+  color: rgba(8, 19, 31, 0.65);
+}
+
+.study-row .s-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.study-row .s-skill {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.study-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 9px;
+}
+
+.study-actions .btn {
+  flex: 1;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
 @media (max-width: 560px) {
+  /* On a phone the globe can't share the width, so the list becomes a sheet
+     across the bottom and gives the globe the whole screen above it. */
+  .study-panel {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: 46vh;
+  }
+
+  .study-title span {
+    display: none;
+  }
+
   .prompt-name {
     font-size: 16px;
   }

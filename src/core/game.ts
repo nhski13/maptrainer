@@ -4,11 +4,12 @@
  *  - blitz:    5 rounds, 20 s each — Versus/Gauntlet pacing.
  *  - survival: endless, shrinking clock, 3 lives — Frontier pacing.
  *  - drill:    10 rounds over a filtered pool, weakness-weighted.
+ *  - country:  every city in one country's pack, most populous first.
  */
 import type { Location } from '../data/types';
 import { haversineKm, scoreForDistance, MAX_SCORE, type LatLon } from './geo';
 
-export type ModeId = 'classic' | 'blitz' | 'survival' | 'drill';
+export type ModeId = 'classic' | 'blitz' | 'survival' | 'drill' | 'country';
 
 /**
  * MapTap's Daily multiplies the later (harder) clues: round 3 counts double,
@@ -60,7 +61,8 @@ export function difficultyFor(mode: ModeId, roundIndex: number): Difficulty | nu
 }
 
 export interface ModeConfig {
-  rounds: number; // Infinity for survival
+  /** Infinity means "however long the queue is" — survival and country. */
+  rounds: number;
   timeLimitSec: number | null;
 }
 
@@ -69,6 +71,9 @@ export const MODE_CONFIG: Record<ModeId, ModeConfig> = {
   blitz: { rounds: 5, timeLimitSec: 20 },
   survival: { rounds: Infinity, timeLimitSec: 20 },
   drill: { rounds: 10, timeLimitSec: null },
+  // A country run is defined by its pack, not by a round count: you asked to
+  // learn India's top 25, so the session is exactly those 25.
+  country: { rounds: Infinity, timeLimitSec: null },
 };
 
 /** Survival: clock shrinks 1 s per round, never below this floor. */
