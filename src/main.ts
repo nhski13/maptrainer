@@ -2,6 +2,14 @@ import './style.css';
 import { LOCATIONS, CONTINENTS } from './data/locations';
 import type { Location } from './data/types';
 import { DRILLS, drillPool, type Drill } from './data/drills';
+import {
+  ALL_LOCATIONS,
+  COUNTRY_PACKS,
+  packCities,
+  packsByContinent,
+  searchPacks,
+  type CountryPack,
+} from './data/countries';
 import { formatKm, formatDistance, grade, scoreEmoji, type LatLon } from './core/geo';
 import {
   createSession,
@@ -43,6 +51,9 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 let stats: StatsMap = loadStats();
 let session: Session | null = null;
 let activeDrill: Drill = DRILLS[0];
+let activeCountry: CountryPack | null = null;
+/** How much of a country's pack a run covers. */
+let countryLimit = 25;
 let globe: Globe | null = null;
 let timerHandle = 0;
 let timerEndsAt = 0;
@@ -72,6 +83,12 @@ const MODES: { id: ModeId; name: string; desc: string; tag: string }[] = [
     name: 'Drill',
     desc: '10 rounds on a focused pool, weighted toward your weak spots.',
     tag: 'targeted',
+  },
+  {
+    id: 'country',
+    name: 'By Country',
+    desc: `Learn one country at a time — its top 25 cities, quizzed or studied. ${COUNTRY_PACKS.length} countries.`,
+    tag: 'study or quiz',
   },
 ];
 
@@ -159,7 +176,11 @@ function showMenu(): void {
         <span class="mode-tag">${m.tag}</span>
       </button>
     `);
-    card.addEventListener('click', () => startGame(m.id));
+    // Every other mode can start immediately; a country run needs to know
+    // which country first.
+    card.addEventListener('click', () =>
+      m.id === 'country' ? showCountryPicker() : startGame(m.id),
+    );
     grid.appendChild(card);
   }
 
@@ -178,9 +199,251 @@ function showMenu(): void {
   setScreen(screen, 'train');
 }
 
+// ── country training ──────────────────────────────────────────────────
+/** Mean skill over the cities of a pack you've actually attempted. */
+function packSkill(pack: CountryPack): { seen: number; total: number; avg: number | null } {
+  const cities = packCities(pack);
+  const seen = cities.filter((l) => stats[l.id]);
+  return {
+    seen: seen.length,
+    total: cities.length,
+    avg: seen.length ? seen.reduce((s, l) => s + stats[l.id].emaScore, 0) / seen.length : null,
+  };
+}
+
+/** Country picker: search, or browse by continent. */
+function showCountryPicker(): void {
+  const screen = el(`
+    <div class="screen">
+      <div class="wrap">
+        <h1>Train by Country</h1>
+        <p class="subtitle">
+          Pick a country and work through its biggest cities — quiz yourself, or
+          study the map first. ${COUNTRY_PACKS.length} countries available.
+        </p>
+        <input class="country-search" type="search" placeholder="Search countries…"
+               autocomplete="off" spellcheck="false" />
+        <div class="country-results"></div>
+      </div>
+    </div>
+  `);
+
+  const results = screen.querySelector<HTMLElement>('.country-results')!;
+  const search = screen.querySelector<HTMLInputElement>('.country-search')!;
+
+  const button = (pack: CountryPack): HTMLElement => {
+    const { seen, total } = packSkill(pack);
+    const chip = el(`
+      <button class="country-btn">
+        <span class="c-name">${esc(pack.name)}</span>
+        <span class="c-meta">${total} cities${seen ? ` · ${seen} seen` : ''}</span>
+      </button>
+    `);
+    chip.addEventListener('click', () => showCountry(pack));
+    return chip;
+  };
+
+  const paint = (): void => {
+    results.innerHTML = '';
+    const query = search.value.trim();
+    if (query) {
+      const hits = searchPacks(query);
+      if (hits.length === 0) {
+        results.appendChild(el(`<div class="empty-note">No country matches “${esc(query)}”.</div>`));
+        return;
+      }
+      const grid = el(`<div class="country-grid"></div>`);
+      for (const pack of hits) grid.appendChild(button(pack));
+      results.appendChild(grid);
+      return;
+    }
+    for (const cont of CONTINENTS) {
+      const packs = packsByContinent(cont.id);
+      if (packs.length === 0) continue;
+      results.appendChild(el(`<h2>${cont.label}</h2>`));
+      const grid = el(`<div class="country-grid"></div>`);
+      for (const pack of packs) grid.appendChild(button(pack));
+      results.appendChild(grid);
+    }
+  };
+
+  search.addEventListener('input', paint);
+  paint();
+  setScreen(screen, 'train');
+  search.focus();
+}
+
+/** The Quiz ⇄ Study toggle both country screens share. */
+function countryToggle(pack: CountryPack, active: 'quiz' | 'study'): HTMLElement {
+  const seg = el(`
+    <div class="seg">
+      <button class="seg-btn ${active === 'quiz' ? 'on' : ''}" data-seg="quiz">Quiz</button>
+      <button class="seg-btn ${active === 'study' ? 'on' : ''}" data-seg="study">Study</button>
+    </div>
+  `);
+  seg.querySelector('[data-seg="quiz"]')!.addEventListener('click', () => {
+    if (active !== 'quiz') showCountry(pack);
+  });
+  seg.querySelector('[data-seg="study"]')!.addEventListener('click', () => {
+    if (active !== 'study') showStudy(pack);
+  });
+  return seg;
+}
+
+/** A country's quiz side: choose how much of the pack to run, then go. */
+function showCountry(pack: CountryPack): void {
+  activeCountry = pack;
+  const total = packCities(pack).length;
+  const { seen, avg } = packSkill(pack);
+
+  const screen = el(`
+    <div class="screen">
+      <div class="wrap">
+        <button class="back-link">← All countries</button>
+        <div class="country-head">
+          <h1>${esc(pack.name)}</h1>
+          <div class="seg-holder"></div>
+        </div>
+        <p class="subtitle">
+          ${total} cities, most populous first — so the run ramps from the ones
+          everyone knows to the ones that don't come for free.
+        </p>
+        <div class="tile-row">
+          <div class="tile"><div class="t-value">${total}</div><div class="t-label">cities in pack</div></div>
+          <div class="tile"><div class="t-value">${seen}</div><div class="t-label">seen before</div></div>
+          <div class="tile"><div class="t-value">${avg === null ? '—' : Math.round(avg)}</div><div class="t-label">avg skill /100</div></div>
+        </div>
+        <h2>Session length</h2>
+        <div class="chip-row length-row"></div>
+        <div class="actions-row">
+          <button class="btn primary start-country">Start Quiz</button>
+          <button class="btn ghost study-instead">Study the map first</button>
+        </div>
+      </div>
+    </div>
+  `);
+
+  screen.querySelector('.seg-holder')!.appendChild(countryToggle(pack, 'quiz'));
+  screen.querySelector('.back-link')!.addEventListener('click', showCountryPicker);
+  screen.querySelector('.study-instead')!.addEventListener('click', () => showStudy(pack));
+  screen.querySelector('.start-country')!.addEventListener('click', () => startGame('country'));
+
+  const lengths = screen.querySelector('.length-row')!;
+  for (const n of [10, 25]) {
+    if (n > total && n !== 25) continue;
+    const label = n >= total ? `All ${total}` : `Top ${n}`;
+    const chip = el(`<button class="chip ${countryLimit === n ? 'selected' : ''}">${label}</button>`);
+    chip.addEventListener('click', () => {
+      countryLimit = n;
+      showCountry(pack);
+    });
+    lengths.appendChild(chip);
+  }
+
+  setScreen(screen, 'train');
+}
+
+/**
+ * Study mode: the whole pack on the globe at once, with the list beside it.
+ * No scoring, no clock — this is the "look at it until it sticks" half of
+ * learning a country, which quizzing alone never does.
+ */
+function showStudy(pack: CountryPack): void {
+  activeCountry = pack;
+  const cities = packCities(pack);
+
+  const screen = el(`
+    <div class="screen game study">
+      <div class="globe-container"></div>
+      <div class="hud-top">
+        <div class="study-head">
+          <button class="back-link">←</button>
+          <div class="study-title">${esc(pack.name)}<span>${cities.length} cities</span></div>
+          <div class="seg-holder"></div>
+        </div>
+      </div>
+      <div class="study-panel">
+        <div class="study-hint">Tap a city to fly there · drag and pinch to explore</div>
+        <div class="study-list"></div>
+        <div class="study-actions">
+          <button class="btn ghost frame-all">Show all</button>
+          <button class="btn primary quiz-now">Quiz me on these</button>
+        </div>
+      </div>
+      <div class="attribution">
+        NASA Blue Marble · <a href="https://s2maps.eu" target="_blank" rel="noopener">Sentinel-2 cloudless</a> by EOX (CC BY-NC-SA 4.0)
+      </div>
+    </div>
+  `);
+
+  screen.querySelector('.seg-holder')!.appendChild(countryToggle(pack, 'study'));
+  screen.querySelector('.back-link')!.addEventListener('click', showCountryPicker);
+  screen.querySelector('.quiz-now')!.addEventListener('click', () => showCountry(pack));
+
+  const list = screen.querySelector<HTMLElement>('.study-list')!;
+  const rows: HTMLElement[] = [];
+  cities.forEach((city, i) => {
+    const st = stats[city.id];
+    const row = el(`
+      <button class="study-row">
+        <span class="s-rank">${i + 1}</span>
+        <span class="s-name">${esc(city.name)}</span>
+        <span class="s-skill">${st ? `${Math.round(st.emaScore)}` : ''}</span>
+      </button>
+    `);
+    row.addEventListener('click', () => select(i));
+    rows.push(row);
+    list.appendChild(row);
+  });
+
+  const container = screen.querySelector<HTMLElement>('.globe-container')!;
+  setScreen(screen, 'train');
+  globe = new Globe(container);
+
+  const markers = cities.map((c) => ({ lat: c.lat, lon: c.lon, label: c.name }));
+  let selected = -1;
+
+  function select(i: number): void {
+    selected = i;
+    rows.forEach((r, n) => r.classList.toggle('on', n === i));
+    globe?.setMarkers(markers, i);
+    const city = cities[i];
+    globe?.prefetchAround(city);
+    globe?.focusOn(city, Globe.CITY_ZOOM);
+    rows[i].scrollIntoView({ block: 'nearest' });
+  }
+
+  const panel = screen.querySelector<HTMLElement>('.study-panel')!;
+
+  function showAll(): void {
+    selected = -1;
+    rows.forEach((r) => r.classList.remove('on'));
+    globe?.setMarkers(markers, -1);
+    // On a phone the list is a sheet across the bottom of the globe rather
+    // than a column beside it; tell the framing how much it hides.
+    const sheet = panel.getBoundingClientRect();
+    const covers = sheet.width > container.clientWidth * 0.8 ? sheet.height + 16 : 0;
+    globe?.frameAll(cities, covers);
+  }
+
+  screen.querySelector('.frame-all')!.addEventListener('click', showAll);
+  showAll();
+
+  keyHandler = (e: KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    select((selected + step + cities.length) % cities.length);
+  };
+  window.addEventListener('keydown', keyHandler);
+}
+
 // ── game ──────────────────────────────────────────────────────────────
 function buildQueue(mode: ModeId): Location[] {
   const now = Date.now();
+  if (mode === 'country') {
+    return activeCountry ? packCities(activeCountry, countryLimit) : [];
+  }
   if (mode === 'drill') {
     return pickWeighted(drillPool(activeDrill), stats, MODE_CONFIG.drill.rounds, now);
   }
@@ -421,8 +684,11 @@ function finishSession(): void {
   const pct = scorePercent(s);
   const g = grade(pct);
   // MapTap's own share format: the total out of 1,000 and an emoji per round.
+  // A country run is named by its country — "MapTrainer country" tells nobody
+  // whether you just cleared India or Iceland.
+  const label = s.mode === 'country' && activeCountry ? activeCountry.name : s.mode;
   const shareText =
-    `MapTrainer ${s.mode} — ${points}/${cap} 🌍\n` +
+    `MapTrainer ${label} — ${points}/${cap} 🌍\n` +
     s.results.map((r) => scoreEmoji(r.score)).join('') +
     `\navg ${Math.round(avg)}/100 · grade ${g}`;
 
@@ -441,6 +707,7 @@ function finishSession(): void {
         <div class="round-list"></div>
         <div class="actions-row">
           <button class="btn primary again">Train Again</button>
+          ${s.mode === 'country' && activeCountry ? '<button class="btn ghost study-again">Study the Misses</button>' : ''}
           <button class="btn ghost share">Copy Result</button>
           <button class="btn ghost menu">Menu</button>
         </div>
@@ -466,8 +733,12 @@ function finishSession(): void {
   }
 
   const mode = s.mode;
+  const country = activeCountry;
   screen.querySelector('.again')!.addEventListener('click', () => startGame(mode));
   screen.querySelector('.menu')!.addEventListener('click', showMenu);
+  screen
+    .querySelector('.study-again')
+    ?.addEventListener('click', () => country && showStudy(country));
   screen.querySelector('.share')!.addEventListener('click', async (e) => {
     try {
       await navigator.clipboard.writeText(shareText);
@@ -485,7 +756,9 @@ function finishSession(): void {
 function showStats(): void {
   const history = loadHistory();
   const streak = loadStreak();
-  const attempted = LOCATIONS.filter((l) => stats[l.id]);
+  // The whole corpus, not just the drill pool: a country run's cities are
+  // just as much a part of your history as the capitals are.
+  const attempted = ALL_LOCATIONS.filter((l) => stats[l.id]);
 
   const screen = el(`
     <div class="screen">
@@ -518,7 +791,7 @@ function showStats(): void {
   tiles.appendChild(tile(String(totalRounds), 'rounds played'));
   tiles.appendChild(tile(attempted.length ? `${Math.round(meanScore)}` : '—', 'avg skill /100'));
   tiles.appendChild(
-    tile(`${attempted.length}/${LOCATIONS.length}`, 'locations seen'),
+    tile(`${attempted.length}/${ALL_LOCATIONS.length}`, 'locations seen'),
   );
   tiles.appendChild(tile(`${streak.current}🔥`, `streak (best ${streak.best})`));
 
@@ -642,7 +915,7 @@ function showStats(): void {
   }
 
   const holder = screen.querySelector('.weak-holder')!;
-  const weakest = weakestLocations(LOCATIONS, stats, 10);
+  const weakest = weakestLocations(ALL_LOCATIONS, stats, 10);
   if (weakest.length === 0) {
     holder.appendChild(el(`<div class="empty-note">No data yet — go play.</div>`));
   } else {

@@ -15,6 +15,7 @@ import {
   geoGraticule10,
   geoDistance,
   geoInterpolate,
+  geoCentroid,
   type GeoProjection,
 } from 'd3-geo';
 import { feature, mesh } from 'topojson-client';
@@ -37,6 +38,11 @@ interface Reveal {
   target: LatLon;
   targetLabel: string;
   errorKm: number;
+}
+
+/** A labelled dot on the globe — study mode's way of showing a whole pack. */
+export interface Marker extends LatLon {
+  label: string;
 }
 
 const MIN_SCALE_FACTOR = 0.45;
@@ -662,6 +668,8 @@ export class Globe {
   private zoom = 1;
   private pin: LatLon | null = null;
   private reveal: Reveal | null = null;
+  private markers: Marker[] = [];
+  private highlight = -1;
   private raf = 0;
   private animRaf = 0;
   private pointers = new Map<number, { x: number; y: number }>();
@@ -732,6 +740,65 @@ export class Globe {
 
   getPin(): LatLon | null {
     return this.pin;
+  }
+
+  /**
+   * Show a whole set of places at once — study mode's map of a country. Pass
+   * an empty array to clear. `highlight` indexes the one being read about, and
+   * is the only marker guaranteed a label when the country is crowded.
+   */
+  setMarkers(markers: Marker[], highlight = -1): void {
+    this.markers = markers;
+    this.highlight = highlight;
+    this.requestRender();
+  }
+
+  /** Point the globe at somewhere, optionally changing zoom. */
+  focusOn(p: LatLon, zoom = this.zoom): void {
+    this.animateTo([-p.lon, -p.lat], Math.max(MIN_SCALE_FACTOR, Math.min(MAX_SCALE_FACTOR, zoom)));
+  }
+
+  /** City-scale zoom, the level the reveal's fly-to settles at. */
+  static readonly CITY_ZOOM = Math.min(MAX_SCALE_FACTOR, ANSWER_ZOOM);
+
+  /**
+   * Frame a set of points: centre on them and back the zoom off until the
+   * farthest-flung one is comfortably inside the viewport.
+   *
+   * Centred on the true centroid, a point θ away sits sin(θ) of a radius from
+   * the middle of the disc, so the set spans 2·R·sin(θ) on screen — solve for
+   * the R that keeps that inside ~70% of the smaller viewport dimension. The
+   * same arithmetic as the reveal's fit, over a set instead of a pair.
+   *
+   * `bottomInsetPx` is for the phone layout, where the city list becomes a
+   * sheet across the bottom of the globe. Zooming out cannot fix that — the
+   * set stays centred on the covered middle either way — so the camera is
+   * aimed slightly south of the centroid instead, lifting the whole country
+   * into the strip that is actually visible.
+   */
+  frameAll(points: LatLon[], bottomInsetPx = 0): void {
+    if (points.length === 0) return;
+    const centre = geoCentroid({
+      type: 'MultiPoint',
+      coordinates: points.map((p) => [p.lon, p.lat]),
+    });
+    // A country straddling the antimeridian can defeat the centroid; falling
+    // back to the first point beats spinning the globe to the wrong hemisphere.
+    const focus: [number, number] = Number.isFinite(centre[0]) && Number.isFinite(centre[1])
+      ? [centre[0], centre[1]]
+      : [points[0].lon, points[0].lat];
+    let theta = 0;
+    for (const p of points) theta = Math.max(theta, geoDistance(focus, [p.lon, p.lat]));
+    const viewport = Math.min(this.container.clientWidth, this.container.clientHeight);
+    const spread = Math.max(Math.sin(Math.min(theta, Math.PI / 2)), 1e-3);
+    const fit = this.baseScale > 0 ? (0.35 * viewport) / (spread * this.baseScale) : 1;
+    const zoom = Math.max(MIN_SCALE_FACTOR, Math.min(MAX_SCALE_FACTOR, fit));
+
+    // Half the inset: that recentres the set in the strip left uncovered.
+    const radius = Math.max(10, this.baseScale * zoom);
+    const lift = Math.asin(Math.min(0.85, bottomInsetPx / 2 / radius));
+    const centreLat = focus[1] - (lift * 180) / Math.PI;
+    this.animateTo([-focus[0], -Math.max(-90, Math.min(90, centreLat))], zoom);
   }
 
   /**
@@ -903,8 +970,10 @@ export class Globe {
 
   private handleTap(x: number, y: number): void {
     // Rotation and zoom stay live during a reveal so you can inspect the
-    // answer; only dropping a new pin is locked out.
-    if (this.reveal) return;
+    // answer; only dropping a new pin is locked out. Study mode passes no
+    // onPin at all — there is nothing to guess, so a tap there should not
+    // leave a marker behind.
+    if (this.reveal || !this.callbacks.onPin) return;
     const t = this.projection.translate()!;
     const r = this.projection.scale()!;
     if (Math.hypot(x - t[0], y - t[1]) > r) return; // tapped off-globe
@@ -1235,8 +1304,57 @@ export class Globe {
     ctx.lineWidth = 1.2;
     ctx.stroke();
 
+    if (this.markers.length > 0) this.renderMarkers();
     if (this.reveal) this.renderReveal(path);
     else if (this.pin) this.drawMarker(this.pin, c('--pin', '#ffb545'));
+  }
+
+  /**
+   * Draw the study-mode set. Twenty-five labels on a globe is a wall of text,
+   * so labels are laid down front-to-back — highlighted marker first, then the
+   * rest in order — and any that would overlap one already placed is dropped.
+   * Zooming in spreads the dots apart and the dropped labels come back, which
+   * is exactly the behaviour that makes the map worth exploring.
+   */
+  private renderMarkers(): void {
+    const styles = getComputedStyle(document.documentElement);
+    const c = (name: string, fallback: string): string =>
+      styles.getPropertyValue(name).trim() || fallback;
+    const plain = c('--target', '#3ddc84');
+    const hot = c('--pin', '#ffb545');
+
+    // Markers arrive in rank order, so index is priority: Mumbai outranks
+    // Coimbatore for the scarce label space, and the highlighted city outranks
+    // them both.
+    const byPriority = [...this.markers.keys()].sort((a, b) => {
+      if (a === this.highlight) return -1;
+      if (b === this.highlight) return 1;
+      return a - b;
+    });
+
+    // Dots paint lowest priority first, so the ones that matter end up on top.
+    for (const i of [...byPriority].reverse()) {
+      const m = this.markers[i];
+      const on = i === this.highlight;
+      this.drawMarker(m, on ? hot : plain, on, 0, on ? 1 : 0.85);
+    }
+
+    const taken: { x: number; y: number; w: number; h: number }[] = [];
+    for (const i of byPriority) {
+      const m = this.markers[i];
+      if (!this.isVisible(m)) continue;
+      const pt = this.projection([m.lon, m.lat]);
+      if (!pt) continue;
+      const box = { x: pt[0], y: pt[1] - 20, w: this.chipWidth(m.label, false), h: 18 };
+      const clash = taken.some(
+        (t) =>
+          Math.abs(t.x - box.x) < (t.w + box.w) / 2 + 4 &&
+          Math.abs(t.y - box.y) < (t.h + box.h) / 2 + 3,
+      );
+      if (clash && i !== this.highlight) continue;
+      taken.push(box);
+      this.drawChip(box.x, box.y, m.label, i === this.highlight ? hot : plain, false);
+    }
   }
 
   private renderReveal(path: ReturnType<typeof geoPath>): void {
@@ -1346,13 +1464,27 @@ export class Globe {
     ctx.restore();
   }
 
+  private chipFont(strong: boolean): string {
+    return strong
+      ? '700 13px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif'
+      : '600 11px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif';
+  }
+
+  /** Width a chip would occupy — for laying labels out before drawing them. */
+  private chipWidth(text: string, strong: boolean): number {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = this.chipFont(strong);
+    const w = ctx.measureText(text).width + (strong ? 9 : 7) * 2;
+    ctx.restore();
+    return w;
+  }
+
   /** Rounded pill of text centred on (x, y). */
   private drawChip(x: number, y: number, text: string, color: string, strong: boolean): void {
     const ctx = this.ctx;
     ctx.save();
-    ctx.font = strong
-      ? '700 13px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif'
-      : '600 11px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif';
+    ctx.font = this.chipFont(strong);
     const padX = strong ? 9 : 7;
     const h = strong ? 22 : 18;
     const w = ctx.measureText(text).width + padX * 2;

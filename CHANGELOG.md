@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.8.0 — 2026-08-17
+
+- **Train by country.** Pick India and work through its top 25 cities, or any
+  of the other 119 countries. A country run is as long as its pack, ordered
+  most populous first, so the session ramps from Mumbai to Visakhapatnam
+  rather than shuffling the two together. **Top 10** trims it to a quick run,
+  and the capital is never trimmed away: a top-10 of
+  Australia without Canberra would be a strange thing to hand someone.
+- **A study mode, because quizzing something you've never seen isn't
+  learning.** Toggle *Study* and the whole pack lands on the globe at once —
+  every city dotted and labelled, the country framed to fit, the list beside
+  it. Tap any city and the globe flies there and zooms to street scale; arrow
+  keys walk the list. Labels are placed biggest-city-first and any that would
+  collide are dropped, so zooming in is what brings the rest of them back.
+  Nothing is scored and nothing is timed — this is the half of learning a
+  country that a quiz can't do, and *Quiz me on these* is one tap away.
+- **2,330 new cities, 120 countries.** Cross-checked between two open
+  gazetteers rather than taken from either: coordinates and populations from
+  SimpleMaps World Cities Basic, names from GeoNames, and a city only ships if
+  both put it in the same place. That check is not ceremony — gazetteer
+  populations are sometimes district totals pinned to a village that shares the
+  city's name — one such record would have taught Gorakhpur 811 km from
+  Gorakhpur. Cities within 25 km of a higher-ranked one are folded away, since
+  closer than the scoring bullseye is not a separate question.
+- Country packs reuse the curated corpus rather than duplicating it: India's
+  pack points at the existing `mumbai`, so your history for a city is the same
+  history whichever mode you meet it in. The Stats tab now counts the whole
+  corpus, and the weakest-locations table can finally surface a city you only
+  ever met in a country run.
+- The globe grew a labelled-marker layer, a `frameAll` that fits a set of
+  points, and — on phones, where the city list becomes a sheet across the
+  bottom — framing that aims above the sheet instead of behind it.
+
 ## 1.7.0 — 2026-08-17
 
 - **The globe fetches its detail imagery before you ask for it.** Zooming used
