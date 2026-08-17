@@ -43,32 +43,45 @@ for the full derivation.
 flawless five-clue run is exactly 1,000. The ladder is `×1 ×1 ×2 ×3 ×3` —
 solved from 434 complete real MapTap games (per-round scores plus posted
 totals), where it reproduces the total exactly in 94.2% of them against 6.5%
-for the next-best candidate. Classic and Blitz carry it; Survival and Drill
-score flat, mirroring Frontier and Practice.
+for the next-best candidate — and confirmed straight from the game, whose
+reveal reads *"Round: 3 (medium - points doubled)"*. The ladder is really a
+difficulty ladder: easy ×1, medium ×2, hard ×3, labelled that way in the HUD.
+Classic and Blitz carry it; Survival and Drill score flat, mirroring Frontier
+and Practice.
 
 Because the multiplier rides on difficulty, Classic and Blitz queues run
 easy → hard rather than shuffled: the ×3 rounds are the ones worth ×3.
 
-**Distance curve.** 100 points inside a 15 km bullseye, then a stretched
-exponential — `100·exp(−((d−15)/1400)^0.85)`. That's ~96 at 50 km, 91 at
-100 km, 67 at 500 km, 48 at 1,000 km, 26 at 2,000 km, zero by 12,000 km.
-MapTap's exact formula is unpublished, so this is calibrated against the score
-distribution of 2,240 real rounds; the headline correction over the old
-`exp(−d/400)` model is the **tail**, which has to stay fat — ~15% of real
-rounds land in the 10–45 band, and misses that big are thousands of km, not
-hundreds.
+**Distance curve.** `100 · (1 − d/20,015 km)^2.6` — the remaining fraction of
+the way to the far side of the planet, raised to a power. Fitted to rounds
+measured off MapTap's own reveal screen: **3,820 km → 58** and
+**13,060 km → 6**. Those two agree on the exponent to within 0.09, and one
+parameter reproduces both exactly.
+
+| Error | 38 km | 500 km | 2,000 km | 3,820 km | 8,000 km | 13,060 km | 17,410 km |
+|---|---|---|---|---|---|---|---|
+| Score | 100 | 94 | 76 | **58** | 27 | **6** | 0 |
+
+MapTap is much gentler than it looks — a miss the width of Germany barely
+registers, coast-to-coast across the USA is still a 58, and you have to be 87%
+of the way around the planet before it bottoms out at zero. The ~38 km bullseye
+and that zero point both fall out of the formula rather than being bolted on.
+Distances are shown in km *and* miles, since miles are what MapTap reports.
 
 Grades run F → GOAT and are computed on the multiplier-weighted percentage, so
 blowing a ×3 round costs you a grade.
 
 ## Reviewing your guess
 
-The globe stays live after you lock in. The reveal drops a dashed geodesic
-between your tap and the answer, labels both ends, and hangs the error
-distance on the middle of the line — then hands the controls straight back, so
-you can drag, pinch and scroll all the way down to Sentinel-2 detail and see
-exactly what you missed and by how much. **Frame both** snaps the view back to
-fit the pair; a tight guess frames itself right on top of the city.
+The reveal plays in two beats, because it has two things to say. First the
+globe frames your tap *and* the answer together, with a dashed geodesic between
+them, both ends labelled, and the error distance hung on the middle of the
+line — that's how far off you were. Then it flies over to the answer and zooms
+to city scale, dropping the pin as it lands — that's where it actually was.
+
+The globe stays live throughout: grab it at any point and the flight cancels
+rather than fighting you, so you can drag, pinch and scroll all the way down to
+Sentinel-2 detail. **Frame both** and **Zoom to answer** replay either beat.
 
 ## Strategy notes (from the trenches)
 

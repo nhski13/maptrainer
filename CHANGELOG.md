@@ -1,5 +1,63 @@
 # Changelog
 
+## 1.6.0 — 2026-08-16
+
+- **Refit the curve again, on two more measured rounds** — and this time two
+  independent anchors agree. From MapTap's own reveal screen:
+  **3,820 km → 58** (Santa Monica) and **13,060 km → 6** (Nicosia). Solved
+  separately they give k = 2.572 and 2.662, and a single exponent of **2.6**
+  reproduces both exactly. The curve is now `100·(1 − d/20,015 km)^2.6`.
+
+  Every model so far has been far too harsh. On that real 58-point round:
+
+  | Model | Scored it |
+  |---|---|
+  | v1.3 | 8 |
+  | v1.4 | 17 |
+  | v1.5 | 38 |
+  | **v1.6** | **58** ✅ |
+
+  Zero is now reachable — the score first rounds to 0 at **17,410 km**, 87% of
+  the way around the planet, which matches players actually posting zeroes.
+  The bullseye widens to ~38 km, still emergent from the formula.
+
+  The older Wolfsburg round (362 km → 92, from a build that reported miles and
+  wrote the score as "92%") remains an outlier the model puts at 95. No
+  two-parameter family tested fits all three better than ±2, so the two
+  consistent current-build rounds win. Detail in `docs/scoring.md`.
+- **The reveal now flies the globe to the answer.** It used to stop at the
+  midpoint between your tap and the target, so the globe never actually
+  travelled to the place you were looking for. Now the reveal plays in two
+  beats: frame both points so the geodesic shows the miss, then fly over to the
+  answer, zoom to city scale, and drop the pin as it lands.
+- Touching the globe cancels the pending fly-to instead of yanking the view
+  away mid-drag. **Frame both** and **Zoom to answer** replay either beat.
+
+## 1.5.0 — 2026-08-16
+
+- **Refit the distance curve on a measured MapTap round.** A reveal screenshot
+  from the game — Wolfsburg, *"Score: 92% Distance: 225 miles"* — pins the
+  curve exactly. 1.4.0 scored that same round **74**, and 1.3.x scored it
+  **42**: both were far too harsh, which is why good guesses lost points and
+  far-off guesses collapsed into the twenties. The curve is now
+  `100·(1 − d/20,015 km)^4.6`, whose single free parameter the anchor fixes
+  (`k = ln 0.92 / ln(1 − 362.1/20015) = 4.567`, admissible range 4.28–4.86).
+
+  | Error | 100 km | 362 km | 1,000 km | 3,000 km | 5,000 km |
+  |---|---|---|---|---|---|
+  | was (1.4.0) | 91 | 74 | 48 | 15 | 5 |
+  | now | 98 | **92** | 79 | 47 | 27 |
+
+  The ~22 km bullseye and the exact zero at antipodal range now fall out of the
+  formula instead of being bolted on as special cases.
+- **The `[×1 ×1 ×2 ×3 ×3]` ladder is confirmed in-game.** The same screenshot
+  reads *"Round: 3 (medium - points doubled)"* — exactly what 1.4.0's fit
+  predicted from the score archive, from an independent source.
+- The HUD now labels rounds the way MapTap does — `easy ×1`, `medium ×2`,
+  `hard ×3` — rather than showing a bare multiplier.
+- Reveal and results rows show distance in km **and** miles, since miles are
+  the unit MapTap reports errors in.
+
 ## 1.4.0 — 2026-08-16
 
 - **Scoring now mirrors MapTap properly — including the round multipliers.**

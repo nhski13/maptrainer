@@ -2,13 +2,14 @@ import './style.css';
 import { LOCATIONS, CONTINENTS } from './data/locations';
 import type { Location } from './data/types';
 import { DRILLS, drillPool, type Drill } from './data/drills';
-import { formatKm, grade, scoreEmoji, type LatLon } from './core/geo';
+import { formatKm, formatDistance, grade, scoreEmoji, type LatLon } from './core/geo';
 import {
   createSession,
   commitGuess,
   currentLocation,
   currentRound,
   currentMultiplier,
+  difficultyFor,
   timeLimitFor,
   totalScore,
   totalPoints,
@@ -279,10 +280,13 @@ function beginRound(screen: HTMLElement): void {
 
   // The multiplier is the whole strategy of a MapTap Daily — show it before
   // the tap, not after, so a ×3 round gets the attention it deserves.
+  // MapTap labels the round by difficulty and states the multiplier next to
+  // it — "Round: 3 (medium - points doubled)". Same here.
   const mult = currentMultiplier(session);
+  const difficulty = difficultyFor(session.mode, currentRound(session));
   const multEl = screen.querySelector<HTMLElement>('.multiplier')!;
-  multEl.hidden = mult === 1;
-  multEl.textContent = `×${mult}`;
+  multEl.hidden = !difficulty;
+  multEl.textContent = difficulty ? `${difficulty} ×${mult}` : '';
   multEl.classList.toggle('hot', mult >= 3);
 
   const cap = maxPoints(session);
@@ -350,7 +354,7 @@ function showRevealCard(screen: HTMLElement, r: RoundResult): void {
   screen.querySelector('.hud-bottom')?.setAttribute('hidden', '');
   const cls = r.score >= 80 ? 'good' : r.score >= 40 ? 'mid' : 'bad';
   const detail = r.guess
-    ? `${formatKm(r.errorKm)} from ${esc(r.location.name)}`
+    ? `${formatDistance(r.errorKm)} from ${esc(r.location.name)}`
     : `Time's up — no pin placed`;
   const isOver = session!.finished;
   const quip = pickQuip(r.score, !r.guess);
@@ -368,11 +372,13 @@ function showRevealCard(screen: HTMLElement, r: RoundResult): void {
       <div class="reveal-hint">Drag, pinch or scroll to inspect the answer</div>
       <div class="reveal-actions">
         <button class="btn ghost reveal-frame">Frame both</button>
+        <button class="btn ghost reveal-zoom">Zoom to answer</button>
         <button class="btn primary reveal-next">${isOver ? 'See Results' : 'Next Round'}</button>
       </div>
     </div>
   `);
   card.querySelector('.reveal-frame')!.addEventListener('click', () => globe?.frameReveal());
+  card.querySelector('.reveal-zoom')!.addEventListener('click', () => globe?.flyToAnswer());
   card.querySelector('.reveal-next')!.addEventListener('click', () => {
     card.remove();
     screen.querySelector('.hud-bottom')?.removeAttribute('hidden');
@@ -445,7 +451,7 @@ function finishSession(): void {
       el(`
         <div class="round-row">
           <div class="r-name">${esc(r.location.name)} <span>${esc(r.location.country)}</span></div>
-          <div class="r-km">${r.guess ? formatKm(r.errorKm) : 'no pin'}</div>
+          <div class="r-km">${r.guess ? formatDistance(r.errorKm) : 'no pin'}</div>
           <div class="r-score" style="color:${tone}">${r.score}</div>
           <div class="r-mult ${r.multiplier > 1 ? 'on' : ''}">×${r.multiplier}</div>
           <div class="r-points">${r.points}</div>

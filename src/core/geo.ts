@@ -4,29 +4,57 @@
  * Two things had to be right for MapTrainer's numbers to mean anything:
  *
  * 1. The per-round curve. MapTap scores each tap 0–100 by great-circle error.
- *    The exact formula is unpublished, so the curve here is fitted to the
- *    score distribution of 2,240 real MapTap rounds (see `docs/scoring.md`).
- *    The headline correction over the old model: MapTap's tail is *fat*.
- *    Real players post scores in the 10–45 band often enough (≈15% of all
- *    rounds) that a plain exp(-d/400) — which is already at ~0 by 1,200 km —
- *    can't produce them. A stretched exponential does: gentle near the
- *    target, long-tailed across oceans, only reaching 0 at antipodal range.
+ *    The formula is unpublished, so this one is anchored on measured rounds
+ *    read off the game's own reveal screen, which fix its single free
+ *    parameter. See `docs/scoring.md`.
+ *
+ *    MapTap is far more forgiving than it looks. A miss the width of Germany
+ *    barely dents the score, a coast-to-coast miss across the USA is still a
+ *    58, and you have to be more than two thirds of the way around the planet
+ *    before it bottoms out at zero. Every earlier model here was far too
+ *    harsh: they scored a real 58-point round 8, 17 and 38 respectively.
  *
  * 2. The round multipliers, which live in `game.ts`.
  */
 
 export const EARTH_RADIUS_KM = 6371;
-
-/** Perfect-score radius, km — inside this you get a flat 100. */
-export const BULLSEYE_KM = 15;
-/** Stretched-exponential scale, km. */
-export const DECAY_SCALE_KM = 1400;
-/**
- * Stretch exponent. <1 flattens the near field and fattens the far tail,
- * which is what separates MapTap's curve from a plain exponential.
- */
-export const DECAY_SHAPE = 0.85;
 export const MAX_SCORE = 100;
+
+/** Antipodal distance — the furthest you can possibly be, ~20,015 km. */
+export const ANTIPODAL_KM = Math.PI * EARTH_RADIUS_KM;
+
+/**
+ * Sole free parameter of the curve, fitted to measured MapTap rounds — pairs
+ * of (distance, score) read straight off the game's own reveal screen:
+ *
+ *   Santa Monica   3,820 km → 58     ← both hit exactly
+ *   Nicosia       13,060 km →  6     ←
+ *   Wolfsburg        362 km → 92     ← model says 95
+ *
+ * The first two are from the same build of the game on the same day and agree
+ * with each other on k to within 0.09; k = 2.6 sits mid-window (2.586–2.613)
+ * of the values that round both to their reported scores.
+ *
+ * The Wolfsburg round is from a visibly older build — it reports miles rather
+ * than km and writes the score as "92%" — and wants k = 4.57 on its own. No
+ * two-parameter family tested reconciles all three to better than ±2, so
+ * rather than contort the curve around a stale data point, this fits the two
+ * consistent modern ones exactly and carries the +3 on Wolfsburg. Supersede
+ * it the moment a current-build round near 400 km turns up.
+ */
+export const SCORE_EXPONENT = 2.6;
+
+/**
+ * Bullseye radius, ~38 km: the distance at which the score stops rounding
+ * to a flat 100 (it is exactly the 99.5 crossing, so treat it as the edge,
+ * not as a value that scores 100 itself).
+ *
+ * Derived from the curve rather than imposed on it. The old model needed an
+ * explicit bullseye bolted on to explain why 5–11% of real rounds score
+ * exactly 100; this one produces one of about the right size on its own.
+ */
+export const BULLSEYE_KM =
+  ANTIPODAL_KM * (1 - Math.pow(0.995, 1 / SCORE_EXPONENT));
 
 export interface LatLon {
   lat: number;
@@ -48,17 +76,21 @@ export function haversineKm(a: LatLon, b: LatLon): number {
 }
 
 /**
- * Distance → 0–100 score. Monotonically non-increasing.
+ * Distance → 0–100 score: the remaining fraction of the way to the far side
+ * of the planet, raised to a power. Smooth, monotonic, exactly 100 at zero
+ * and exactly 0 at the antipode — no piecewise seams.
  *
- * Reference points on this curve:
- *   ≤15 km → 100 · 50 km → 96 · 100 km → 91 · 250 km → 80 · 500 km → 67
- *   1,000 km → 48 · 2,000 km → 26 · 5,000 km → 5 · 12,000 km+ → 0
+ *   score(d) = 100 · (1 − d / 20,015 km) ^ 2.6
+ *
+ * Reference points:
+ *   ≤38 km → 100 · 500 km → 94 · 1,000 km → 88 · 2,000 km → 76
+ *   3,820 km → 58 (measured) · 8,000 km → 27 · 13,060 km → 6 (measured)
+ *   17,410 km+ → 0 — a zero is possible, but you have to earn it
  */
 export function scoreForDistance(km: number): number {
   if (!Number.isFinite(km) || km < 0) return 0;
-  if (km <= BULLSEYE_KM) return MAX_SCORE;
-  const reach = (km - BULLSEYE_KM) / DECAY_SCALE_KM;
-  return Math.round(MAX_SCORE * Math.exp(-Math.pow(reach, DECAY_SHAPE)));
+  const remaining = Math.max(0, 1 - km / ANTIPODAL_KM);
+  return Math.round(MAX_SCORE * Math.pow(remaining, SCORE_EXPONENT));
 }
 
 /**
@@ -83,11 +115,26 @@ export function scoreEmoji(score: number, rand = Math.random): string {
   return band.emoji[Math.floor(rand() * band.emoji.length)];
 }
 
+export const KM_PER_MILE = 1.609344;
+
 /** Human-friendly distance label. */
 export function formatKm(km: number): string {
   if (km < 1) return '<1 km';
   if (km < 100) return `${km.toFixed(1)} km`;
   return `${Math.round(km).toLocaleString()} km`;
+}
+
+/** Same, in miles — the unit MapTap itself reports errors in. */
+export function formatMiles(km: number): string {
+  const mi = km / KM_PER_MILE;
+  if (mi < 1) return '<1 mi';
+  if (mi < 100) return `${mi.toFixed(1)} mi`;
+  return `${Math.round(mi).toLocaleString()} mi`;
+}
+
+/** Both units, for the reveal — MapTap reports miles, the app thinks in km. */
+export function formatDistance(km: number): string {
+  return `${formatKm(km)} · ${formatMiles(km)}`;
 }
 
 /** Grade letter for a 0–100 average. */
