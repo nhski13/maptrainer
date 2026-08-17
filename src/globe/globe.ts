@@ -30,6 +30,8 @@ const graticule = geoGraticule10();
 
 export interface GlobeCallbacks {
   onPin?: (p: LatLon) => void;
+  /** Tap on the globe while a reveal is up — pins are locked, so it's a "let me look". */
+  onRevealTap?: () => void;
 }
 
 interface Reveal {
@@ -616,8 +618,12 @@ export class Globe {
 
   private handleTap(x: number, y: number): void {
     // Rotation and zoom stay live during a reveal so you can inspect the
-    // answer; only dropping a new pin is locked out.
-    if (this.reveal) return;
+    // answer; only dropping a new pin is locked out. The tap still means
+    // something though — it's the cue to get the score card out of the way.
+    if (this.reveal) {
+      this.callbacks.onRevealTap?.();
+      return;
+    }
     const t = this.projection.translate()!;
     const r = this.projection.scale()!;
     if (Math.hypot(x - t[0], y - t[1]) > r) return; // tapped off-globe

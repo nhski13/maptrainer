@@ -87,6 +87,12 @@ The globe stays live throughout: grab it at any point and the flight cancels
 rather than fighting you, so you can drag, pinch and scroll all the way down to
 Sentinel-2 detail. **Frame both** and **Zoom to answer** replay either beat.
 
+The score card gets out of the way when you want the map instead. Tap the globe,
+swipe the card down, hit the **✕**, or press **Esc**, and it folds to a slim bar
+holding your points and **Next Round** — tap the points chip to bring the full
+card back. On a phone that's the difference between seeing the answer and seeing
+a panel where the answer was. The choice sticks for the rest of the session.
+
 ## Strategy notes (from the trenches)
 
 - **Anchor off big shapes.** Find the country first, then the region, then commit.

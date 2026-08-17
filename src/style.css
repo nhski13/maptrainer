@@ -421,6 +421,72 @@ h2 {
   backdrop-filter: blur(8px);
   min-width: 300px;
   max-width: min(420px, calc(100vw - 20px));
+  /* the card owns its own gestures — swipe down tucks it away */
+  touch-action: none;
+}
+
+/* Tucked away: the panel chrome goes with it, leaving two floating pills. */
+.reveal-card.collapsed {
+  padding: 0;
+  min-width: 0;
+  background: none;
+  border-color: transparent;
+  backdrop-filter: none;
+}
+
+.reveal-card.collapsed .reveal-body,
+.reveal-card.collapsed .reveal-dismiss,
+.reveal-card:not(.collapsed) .reveal-peek {
+  display: none;
+}
+
+.reveal-dismiss {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ink-3);
+}
+
+.reveal-dismiss:hover {
+  color: var(--ink);
+  background: rgba(120, 170, 255, 0.12);
+}
+
+.reveal-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.reveal-card.collapsed .reveal-footer {
+  margin-top: 0;
+}
+
+/* The collapsed score chip — tap it to bring the full card back. */
+.reveal-peek {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 19px;
+  font-weight: 800;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(8px);
+}
+
+.reveal-peek span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
 }
 
 /* score × multiplier, set small beside the points total */
@@ -491,15 +557,18 @@ h2 {
   font-weight: 800;
 }
 
-.reveal-score.good {
+.reveal-score.good,
+.reveal-peek.good {
   color: var(--good);
 }
 
-.reveal-score.mid {
+.reveal-score.mid,
+.reveal-peek.mid {
   color: var(--accent-2);
 }
 
-.reveal-score.bad {
+.reveal-score.bad,
+.reveal-peek.bad {
   color: var(--bad);
 }
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.1 — 2026-08-17
+
+- **The score card can be dismissed.** It sits at the bottom of the globe, which
+  on a phone is roughly where the answer ends up once the reveal flies there —
+  so the panel telling you about the answer was covering it. Four ways to get it
+  out of the way now, whichever one you reach for first: tap the globe, swipe the
+  card down, press **Esc**, or hit the **✕**. It folds to a slim bar that keeps
+  the points and **Next Round**; the points chip brings the full card back.
+  Dismissing sticks for the rest of the session, so it isn't five taps a run.
+
 ## 1.6.0 — 2026-08-16
 
 - **Refit the curve again, on two more measured rounds** — and this time two

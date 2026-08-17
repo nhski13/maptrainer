@@ -47,6 +47,12 @@ let globe: Globe | null = null;
 let timerHandle = 0;
 let timerEndsAt = 0;
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
+// The reveal card sits on top of the globe, which is exactly the thing you
+// want to look at once the answer drops. It can be tucked away to a slim bar,
+// and the choice sticks for the rest of the session — nobody wants to dismiss
+// the same card five rounds running.
+let revealCollapsed = false;
+let collapseReveal: (() => void) | null = null;
 
 const MODES: { id: ModeId; name: string; desc: string; tag: string }[] = [
   {
@@ -92,6 +98,7 @@ function teardownGame(): void {
   clearInterval(timerHandle);
   globe?.destroy();
   globe = null;
+  collapseReveal = null;
   if (keyHandler) {
     window.removeEventListener('keydown', keyHandler);
     keyHandler = null;
@@ -205,6 +212,7 @@ function startGame(mode: ModeId): void {
   const queue = buildQueue(mode);
   if (queue.length === 0) return;
   session = createSession(mode, queue);
+  revealCollapsed = false;
 
   const screen = el(`
     <div class="screen game">
@@ -241,12 +249,18 @@ function startGame(mode: ModeId): void {
     onPin: () => {
       lockBtn.disabled = false;
     },
+    // Tapping the globe during a reveal means "let me look" — get out of the way.
+    onRevealTap: () => collapseReveal?.(),
   });
 
   screen.querySelector('.reset-view')!.addEventListener('click', () => globe?.resetView());
   lockBtn.addEventListener('click', () => lockIn(screen));
 
   keyHandler = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      collapseReveal?.();
+      return;
+    }
     if (e.key === 'Enter') {
       const next = document.querySelector<HTMLButtonElement>('.reveal-next');
       if (next) next.click();
@@ -364,27 +378,79 @@ function showRevealCard(screen: HTMLElement, r: RoundResult): void {
     r.multiplier > 1
       ? `+${r.points}<span class="reveal-math">${r.score} × ${r.multiplier}</span>`
       : `+${r.points}`;
+  // Collapsed, the card keeps only what you need to carry on: the points and
+  // the Next Round button. Everything else — the miss, the quip, the camera
+  // buttons — folds away so the globe underneath is actually visible.
   const card = el(`
-    <div class="reveal-card">
-      <div class="reveal-score ${cls}">${scoreLine}</div>
-      <div class="reveal-detail">${detail}</div>
-      <div class="reveal-quip">${esc(quip)}</div>
-      <div class="reveal-hint">Drag, pinch or scroll to inspect the answer</div>
-      <div class="reveal-actions">
-        <button class="btn ghost reveal-frame">Frame both</button>
-        <button class="btn ghost reveal-zoom">Zoom to answer</button>
+    <div class="reveal-card${revealCollapsed ? ' collapsed' : ''}">
+      <button class="reveal-dismiss" title="Tuck away (Esc)" aria-label="Tuck the score card away">✕</button>
+      <div class="reveal-body">
+        <div class="reveal-score ${cls}">${scoreLine}</div>
+        <div class="reveal-detail">${detail}</div>
+        <div class="reveal-quip">${esc(quip)}</div>
+        <div class="reveal-hint">Drag, pinch or scroll to inspect · tap the globe to tuck this away</div>
+        <div class="reveal-actions">
+          <button class="btn ghost reveal-frame">Frame both</button>
+          <button class="btn ghost reveal-zoom">Zoom to answer</button>
+        </div>
+      </div>
+      <div class="reveal-footer">
+        <button class="reveal-peek ${cls}" aria-label="Show the score card">+${r.points}<span>details</span></button>
         <button class="btn primary reveal-next">${isOver ? 'See Results' : 'Next Round'}</button>
       </div>
     </div>
   `);
+
+  const setCollapsed = (v: boolean): void => {
+    revealCollapsed = v;
+    card.classList.toggle('collapsed', v);
+  };
+  collapseReveal = () => setCollapsed(true);
+
+  card.querySelector('.reveal-dismiss')!.addEventListener('click', () => setCollapsed(true));
+  card.querySelector('.reveal-peek')!.addEventListener('click', () => setCollapsed(false));
   card.querySelector('.reveal-frame')!.addEventListener('click', () => globe?.frameReveal());
   card.querySelector('.reveal-zoom')!.addEventListener('click', () => globe?.flyToAnswer());
   card.querySelector('.reveal-next')!.addEventListener('click', () => {
+    collapseReveal = null;
     card.remove();
     screen.querySelector('.hud-bottom')?.removeAttribute('hidden');
     if (isOver) finishSession();
     else beginRound(screen);
   });
+
+  // Swipe the card down to tuck it away — the gesture a phone user reaches for
+  // before they go hunting for a close button.
+  let swipeFromY: number | null = null;
+  let swiped = false;
+  card.addEventListener('pointerdown', (e) => {
+    swiped = false;
+    swipeFromY = card.classList.contains('collapsed') ? null : e.clientY;
+  });
+  card.addEventListener('pointercancel', () => {
+    swipeFromY = null;
+  });
+  card.addEventListener('pointerup', (e) => {
+    if (swipeFromY === null) return;
+    const dy = e.clientY - swipeFromY;
+    swipeFromY = null;
+    if (dy > 40) {
+      swiped = true;
+      setCollapsed(true);
+    }
+  });
+  // A swipe that ends over a button still fires a click; swallow that one.
+  card.addEventListener(
+    'click',
+    (e) => {
+      if (!swiped) return;
+      swiped = false;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
+
   screen.appendChild(card);
 }
 
