@@ -265,6 +265,11 @@ function beginRound(screen: HTMLElement): void {
 
   globe.clearReveal();
   globe.setPin(null);
+  // Pull the answer's satellite imagery in the background while the round is
+  // being played, so the reveal's zoom lands sharp instead of unblurring after
+  // it arrives. Nothing is given away — every location's coordinates are in
+  // the bundle already, and the prompt names the place.
+  globe.prefetchAround(loc);
   screen.querySelector<HTMLButtonElement>('.lock-in')!.disabled = true;
 
   const askByCountry =

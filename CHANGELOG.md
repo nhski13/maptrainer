@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.7.0 — 2026-08-17
+
+- **The globe fetches its detail imagery before you ask for it.** Zooming used
+  to be a cold start every single time: the view had to come to a complete
+  stop, wait out a 280 ms settle, and then pull a whole 30–60 tile patch off
+  the network before anything sharpened. Now the tiles for the first two zoom
+  levels are already on their way ~150 ms after the globe appears, and the
+  level below whatever you're looking at is fetched while you look at it. In a
+  stubbed 250 ms-latency browser run, the first zoom-in went from 25 tiles of
+  waiting to **zero** — the sharp version is simply there on the next frame.
+- **Anything already in cache skips the settle entirely.** Detail now runs at
+  two speeds: a warm level is composited and swapped in on the current frame,
+  and only work that still needs the network waits for the view to stop. The
+  settle itself is down to 150 ms.
+- **The reveal's zoom lands sharp.** The round's answer is pre-fetched at the
+  exact zoom the fly-to settles at, during the round, so the camera arrives on
+  imagery that's already there instead of unblurring after it stops. (Nothing
+  is given away — every location's coordinates ship in the bundle, and the
+  prompt names the place.) The framing beat before it gets the same treatment
+  the moment your guess is locked in.
+- **A patch that's still loading now sharpens instead of blinking.** Patches
+  start as an upscaled crop of the Blue Marble base and fill in tile by tile,
+  so you see detail arrive progressively. One tile that 404s costs one blurry
+  square; it used to throw the entire patch away.
+- Tile cache is LRU rather than FIFO, so pre-fetching can't evict the tiles
+  you're currently looking at, and duplicate requests for the same tile now
+  share one fetch. Pre-fetching backs off entirely on Save-Data and 2G.
+
 ## 1.6.0 — 2026-08-16
 
 - **Refit the curve again, on two more measured rounds** — and this time two
