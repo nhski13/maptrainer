@@ -21,10 +21,11 @@
   the way around the planet, which matches players actually posting zeroes.
   The bullseye widens to ~38 km, still emergent from the formula.
 
-  The older Wolfsburg round (362 km → 92, from a build that reported miles and
-  wrote the score as "92%") remains an outlier the model puts at 95. No
-  two-parameter family tested fits all three better than ±2, so the two
-  consistent current-build rounds win. Detail in `docs/scoring.md`.
+  The Wolfsburg round (362 km → 92, reported the same day but on a
+  different-looking screen — miles, and the score written as "92%") remains an
+  outlier the model puts at 95. No two-parameter family tested fits all three
+  better than ±2, so the two rounds that agree with each other win. Detail in
+  `docs/scoring.md`.
 - **The reveal now flies the globe to the answer.** It used to stop at the
   midpoint between your tap and the target, so the globe never actually
   travelled to the place you were looking for. Now the reveal plays in two

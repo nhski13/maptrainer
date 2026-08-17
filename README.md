@@ -42,7 +42,8 @@ for the full derivation.
 **Round multipliers.** MapTap's Daily multiplies the later, harder clues, so a
 flawless five-clue run is exactly 1,000. The ladder is `×1 ×1 ×2 ×3 ×3` —
 solved from 434 complete real MapTap games (per-round scores plus posted
-totals), where it reproduces the total exactly in 94.2% of them against 6.5%
+totals, archived by a 12-player friend group in late 2025), where it
+reproduces the total exactly in 94.2% of them against 6.5%
 for the next-best candidate — and confirmed straight from the game, whose
 reveal reads *"Round: 3 (medium - points doubled)"*. The ladder is really a
 difficulty ladder: easy ×1, medium ×2, hard ×3, labelled that way in the HUD.
@@ -63,10 +64,13 @@ parameter reproduces both exactly.
 | Score | 100 | 94 | 76 | **58** | 27 | **6** | 0 |
 
 MapTap is much gentler than it looks — a miss the width of Germany barely
-registers, coast-to-coast across the USA is still a 58, and you have to be 87%
-of the way around the planet before it bottoms out at zero. The ~38 km bullseye
-and that zero point both fall out of the formula rather than being bolted on.
-Distances are shown in km *and* miles, since miles are what MapTap reports.
+registers, and coast-to-coast across the USA is still a 58. The ~38 km bullseye
+falls out of the formula rather than being bolted on. Distances are shown in km
+*and* miles, since miles are what MapTap reports.
+
+The far end is the weak spot: zero first appears at 17,410 km, but the furthest
+measured round is Nicosia at 13,060 km, so everything past that is
+extrapolation. A measured zero, with its distance, would pin it down.
 
 Grades run F → GOAT and are computed on the multiplier-weighted percentage, so
 blowing a ×3 round costs you a grade.

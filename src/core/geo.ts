@@ -31,16 +31,18 @@ export const ANTIPODAL_KM = Math.PI * EARTH_RADIUS_KM;
  *   Nicosia       13,060 km →  6     ←
  *   Wolfsburg        362 km → 92     ← model says 95
  *
- * The first two are from the same build of the game on the same day and agree
- * with each other on k to within 0.09; k = 2.6 sits mid-window (2.586–2.613)
- * of the values that round both to their reported scores.
+ * The first two came from the same screen (the numbered Daily, distances in
+ * km, score written plain) and agree with each other on k to within 0.09;
+ * k = 2.6 sits mid-window (2.586–2.613) of the values that round both to
+ * their reported scores.
  *
- * The Wolfsburg round is from a visibly older build — it reports miles rather
- * than km and writes the score as "92%" — and wants k = 4.57 on its own. No
- * two-parameter family tested reconciles all three to better than ±2, so
- * rather than contort the curve around a stale data point, this fits the two
- * consistent modern ones exactly and carries the +3 on Wolfsburg. Supersede
- * it the moment a current-build round near 400 km turns up.
+ * The Wolfsburg round wants k = 4.57 on its own. It was reported the same day
+ * but off a different-looking screen — distance in miles, score written "92%"
+ * — so it may be a different mode or a units setting; the cause is unknown,
+ * and calling it stale would be a guess. No two-parameter family tested
+ * reconciles all three to better than ±2, so this fits the pair that agree
+ * and carries the +3 on Wolfsburg. A third same-screen round near 400 km
+ * would settle whether the curve or the outlier is wrong.
  */
 export const SCORE_EXPONENT = 2.6;
 
@@ -95,8 +97,10 @@ export function scoreForDistance(km: number): number {
 
 /**
  * MapTap's share grid uses an emoji per round instead of the raw number.
- * Bands (and their members) are read off the emoji→score ranges observed in
- * the same 2,240-round sample; MapTap picks one at random within a band.
+ * Bands (and their members) are read off the emoji→score ranges seen in the
+ * 12-player 2025 archive described in `docs/scoring.md`; MapTap picks one at
+ * random within a band. Cosmetic only, and the sample is small and old — if
+ * the emoji look wrong in a current share, this is why.
  */
 const SCORE_EMOJI: { min: number; emoji: string[] }[] = [
   { min: 95, emoji: ['🎯', '🔥', '💯', '🏅', '🥇'] },
