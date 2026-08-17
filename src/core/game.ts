@@ -15,9 +15,13 @@ export type ModeId = 'classic' | 'blitz' | 'survival' | 'drill';
  * rounds 4 and 5 count triple, so a flawless five-clue run is exactly 1,000.
  *
  * This ladder is not guesswork — it was solved from 434 complete real MapTap
- * games (per-round scores + shared totals). [1,1,2,3,3] reproduces the posted
- * total exactly in 94.2% of them; the next-best candidate manages 6.5%, and
- * the residual misses are transcription noise in the source data.
+ * games (per-round scores + shared totals) archived by a 12-player friend
+ * group over 82 days in late 2025. [1,1,2,3,3] reproduces the posted total
+ * exactly in 94.2% of them; the next-best candidate manages 6.5%, and the
+ * residual misses are transcription noise in the source data. A small sample
+ * is fine here because the ladder is structural, not statistical — and an
+ * in-game screenshot ("Round: 3 (medium - points doubled)") confirms it
+ * independently.
  */
 export const DAILY_MULTIPLIERS: readonly number[] = [1, 1, 2, 3, 3];
 /** A flawless five-clue Daily. */

@@ -18,9 +18,16 @@ and labels each round by tier — its reveal reads
 This is the part that was previously missing from MapTrainer entirely, and it
 is not a guess.
 
-`unarmedpuppy/maptapdat` is a third-party MapTap leaderboard that archives
-players' shared results: per-round scores *and* the posted total, for every
-game. That makes the multiplier ladder solvable — it is the integer vector
+`unarmedpuppy/maptapdat` is a dashboard someone built to track their friend
+group's MapTap scores, scraped from pasted iMessage share texts. It records
+per-round scores *and* the posted total for every game.
+
+**Know what this is before leaning on it: 12 players, 82 days, 2025-09-19 to
+2025-12-09, 2,994 usable rounds.** One social circle, and nine months old at
+time of writing. It is strong evidence for *structural* facts that a small
+sample still pins down exactly — the multiplier ladder below — and weak
+evidence for anything distributional, because scoring may have changed since
+and twelve people are not the player base. That makes the multiplier ladder solvable — it is the integer vector
 `m` satisfying `Σ mᵢ·scoreᵢ = total` across every game at once.
 
 Searching all 4⁵ candidate vectors over the 434 complete games where every
@@ -53,11 +60,11 @@ multipliers*).
 MapTap does not publish its distance→score formula, but it prints both numbers
 on its own reveal screen. Three such rounds:
 
-| Round | Distance | Score | Build |
+| Round | Distance | Score | Reported on |
 |---|---|---|---|
-| Santa Monica, CA | 3,820 km | 58 | current (km, `Score: 58`) |
-| Nicosia, Cyprus | 13,060 km | 6 | current (km, `Score: 6`) |
-| Wolfsburg, Germany | 362 km (225 mi) | 92 | older (miles, `Score: 92%`) |
+| Santa Monica, CA | 3,820 km | 58 | numbered Daily (`MapTap #786`), km, `Score: 58` |
+| Nicosia, Cyprus | 13,060 km | 6 | same screen, km, `Score: 6` |
+| Wolfsburg, Germany | 362 km (225 mi) | 92 | different screen, miles, `Score: 92%` |
 
 The curve is the remaining fraction of the way to the far side of the planet,
 raised to a power — one free parameter:
@@ -73,12 +80,14 @@ scores is **2.586–2.613**, and 2.6 sits mid-window. One parameter, two exact
 hits.
 
 **The Wolfsburg outlier.** That round wants `k = 4.57` and the model gives it
-95 against a reported 92. It is from a visibly older build — miles instead of
-km, and the score written as `92%` rather than `92`. A grid search over
-two-parameter families (`(1−d/D)^k`, `exp(−(d/D)^p)`, `(1−(d/A)^a)^b`) found
-nothing that fits all three better than ±2, so rather than contort the curve
-around a stale point this fits the two consistent modern ones exactly and
-carries the +3. A current-build round somewhere near 400 km would settle it.
+95 against a reported 92. It was reported on the same day as the other two but
+off a different-looking screen — distance in miles, score written `92%` rather
+than `92` — so it may be a different mode, or a units setting, or a scoring
+difference. **The cause is unknown; do not assume it is stale.** A grid search
+over two-parameter families (`(1−d/D)^k`, `exp(−(d/D)^p)`, `(1−(d/A)^a)^b`)
+found nothing fitting all three better than ±2, so this fits the pair that
+agree with each other and carries the +3. A third same-screen round near
+400 km would settle whether the curve or the outlier is wrong.
 
 | Error | 38 km | 500 km | 1,000 km | 2,000 km | 3,820 km | 8,000 km | 13,060 km | 17,410 km |
 |---|---|---|---|---|---|---|---|---|
@@ -100,8 +109,14 @@ Two things fall out of the form rather than being bolted on:
   with no piecewise branch. Some radius of this order is required, because
   5–11% of real rounds score exactly 100 and no smooth curve produces that.
 - **Zero is reachable but has to be earned.** The score first rounds to 0 at
-  **17,410 km** — 87% of the way around the planet. Players do post zeroes, so
-  the curve has to bottom out inside the range of real misses, but not before.
+  **17,410 km** — 87% of the way around the planet, a tap within 23.4° of the
+  exact antipode, or 4.1% of the Earth's surface. That is the one part of the
+  curve with no anchor behind it: the furthest measured round is Nicosia at
+  13,060 km, so everything past that is extrapolation. The 2025 archive shows
+  0.47% of rounds scoring exactly 0 (2.08% on round 5, 0% on rounds 1–2), but
+  those zeroes were earned under whatever curve was live in 2025, so they
+  cannot be converted into distances with this one. **A measured zero, with
+  its distance, is the single most valuable missing data point.**
 
 **Honest status: the ladder is measured and confirmed; the curve rests on two
 consistent measured points plus one older outlier.** `SCORE_EXPONENT` is the
@@ -109,8 +124,9 @@ only constant that moves if more rounds turn up.
 
 ### For reference: the score distribution
 
-From 2,240 real rounds in the archive — context for the curve, not an input
-to it.
+From the 2,994 usable rounds in the 12-player archive described above —
+context for the curve, not an input to it, and possibly from an older scoring
+regime.
 
 | Round | mean | median | p10 | ≥90 | =100 | <50 |
 |---|---|---|---|---|---|---|
@@ -161,8 +177,9 @@ one tier-3, so the ×3 rounds are the ones actually worth ×3.
   [Qiaeru](https://qiaeru.com/en/blog/2026/06/18/maptap-guessing-the-world-one-tap-at-a-time/)
 - Game modes (Daily, Versus, Frontier, Practice, Adventures) —
   [maptap.gg](https://maptap.gg/), [App Store](https://apps.apple.com/us/app/maptap-gg/id6755205355)
-- Per-round score archive (524 games, 3,108 rows) —
-  [unarmedpuppy/maptapdat](https://github.com/unarmedpuppy/maptapdat)
+- Per-round score archive — [unarmedpuppy/maptapdat](https://github.com/unarmedpuppy/maptapdat):
+  12 players, 2025-09-19 to 2025-12-09, 2,994 usable rounds, scraped from
+  iMessage share texts
 - Measured (distance, score) rounds and the `Round: 3 (medium - points
   doubled)` label — in-game reveal screenshots supplied by the user,
   2026-08-16 (MapTap #786 and one older build)
