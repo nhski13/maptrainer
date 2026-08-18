@@ -58,72 +58,142 @@ difficulty ladder — easy ×1, medium ×2, hard ×3 — which is what
 Reproduce it with `npm test` (`tests/game.test.ts` → *MapTap round
 multipliers*).
 
-## The distance curve: fitted to measured rounds
+## The distance curve: fitted to six measured rounds
 
 MapTap does not publish its distance→score formula, but it prints both numbers
-on its own reveal screen. Three such rounds:
+on its own reveal screen. Six such rounds have now been read off it:
 
 | Round | Distance | Score | Reported on |
 |---|---|---|---|
-| Santa Monica, CA | 3,820 km | 58 | numbered Daily (`MapTap #786`), km, `Score: 58` |
-| Nicosia, Cyprus | 13,060 km | 6 | same screen, km, `Score: 6` |
-| Wolfsburg, Germany | 362 km (225 mi) | 92 | different screen, miles, `Score: 92%` |
+| Wolfsburg, Germany | 362 km (225 mi) | 92 | miles, `Score: 92%` |
+| Fairbanks, Alaska | 538 km (334 mi) | 89 | `MapTap #788`, miles, `Score: 89 (x2)` |
+| Samarkand, Uzbekistan | 541 km (336 mi) | 89 | `MapTap #788`, miles, `Score: 89 (x3)` |
+| Karakorum, Mongolia | 1,022 km (635 mi) | 80 | `MapTap #788`, miles, `Score: 80 (x3)` |
+| Santa Monica, CA | 3,820 km | 58 | `MapTap #786`, km, `Score: 58` |
+| Nicosia, Cyprus | 13,060 km | 6 | `MapTap #786`, km, `Score: 6` |
 
-The curve is the remaining fraction of the way to the far side of the planet,
-raised to a power — one free parameter:
+The curve fitted to them is
 
 ```
-score(d) = 100 · (1 − d / 20,015 km) ^ 2.6
+score(d) = 100 · (1 − ((d − 40 km) / 14,300 km) ^ 0.65)
 ```
 
-**Why 2.6.** Solve each anchor for `k` on its own and the two same-screen
-rounds land on 2.572 and 2.662 — agreement to within 0.09, from two rounds
-thousands of km apart. The window of `k` that rounds *both* to their reported
-scores is **2.586–2.613**, and 2.6 sits mid-window. One parameter, two exact
-hits.
+| Round | MapTap | this curve | previous curve `(1−d/20015)^2.6` |
+|---|---|---|---|
+| Wolfsburg | 92 | **92** ✅ | 95 |
+| Fairbanks | 89 | **89** ✅ | 93 |
+| Samarkand | 89 | **89** ✅ | 93 |
+| Karakorum | 80 | 82 | 87 |
+| Santa Monica | 58 | **58** ✅ | 58 ✅ |
+| Nicosia | 6 | **6** ✅ | 6 ✅ |
 
-**The Wolfsburg outlier.** That round wants `k = 4.57` and the model gives it
-95 against a reported 92. It was reported on the same day as the other two but
-off a different-looking screen — distance in miles, score written `92%` rather
-than `92` — so it may be a different mode, or a units setting, or a scoring
-difference. **The cause is unknown; do not assume it is stale.** A grid search
-over two-parameter families (`(1−d/D)^k`, `exp(−(d/D)^p)`, `(1−(d/A)^a)^b`)
-found nothing fitting all three better than ±2, so this fits the pair that
-agree with each other and carries the +3. A third same-screen round near
-400 km would settle whether the curve or the outlier is wrong.
+### Why the family had to change, not just the exponent
 
-| Error | 38 km | 500 km | 1,000 km | 2,000 km | 3,820 km | 8,000 km | 13,060 km | 17,410 km |
-|---|---|---|---|---|---|---|---|---|
-| Score | 100 | 94 | 88 | 76 | **58** | 27 | **6** | 0 |
+Version 1.6 fitted `100 · (1 − d/20,015)^k` on the two `#786` rounds, which
+agreed with each other on `k ≈ 2.6` to within 0.09. It also carried a known
+outlier: Wolfsburg at 362 km wanted `k = 4.57` and got scored 95 against a
+reported 92. That was written up as unexplained, possibly a different mode or
+units setting, with the note that *a third round near 400 km would settle
+whether the curve or the outlier is wrong*.
 
-**MapTap is much gentler than it looks**, and every model here has been far
-too harsh. On the real 58-point Santa Monica round:
+Three such rounds arrived (`MapTap #788`, above), and they settled it against
+the curve. Solve each round for its own `k` under the old family:
 
-| Model | Scored it |
-|---|---|
-| v1.3 `100·exp(−(d−15)/400)` | 8 |
-| v1.4 `100·exp(−((d−15)/1400)^0.85)` | 17 |
-| v1.5 `100·(1 − d/20015)^4.6` | 38 |
-| **v1.6 `100·(1 − d/20015)^2.6`** | **58** ✅ |
+| Round | 362 km | 538 km | 541 km | 1,022 km | 3,820 km | 13,060 km |
+|---|---|---|---|---|---|---|
+| implied `k` | 4.57 | 4.28 | 4.26 | 4.26 | 2.57 | 2.66 |
 
-Two things fall out of the form rather than being bolted on:
+Four near rounds cluster at `k ≈ 4.3`, two far rounds at `k ≈ 2.6`. No single
+`k` serves both, and no choice of the second parameter rescues it: a grid over
+`(1 − d/D)^k` with `D` free bottoms out at max error 6, and `exp(−(d/a)^p)` at
+7. Wolfsburg was never an outlier — it was the first sight of the near half of
+a curve the old family had the wrong shape for.
 
-- **The bullseye is emergent** — everything inside ~38 km rounds to a flat 100,
-  with no piecewise branch. Some radius of this order is required, because
-  5–11% of real rounds score exactly 100 and no smooth curve produces that.
-- **Zero is reachable but has to be earned.** The score first rounds to 0 at
-  **17,410 km** — 87% of the way around the planet, a tap within 23.4° of the
-  exact antipode, or 4.1% of the Earth's surface. That is the one part of the
-  curve with no anchor behind it: the furthest measured round is Nicosia at
-  13,060 km, so everything past that is extrapolation. The 2025 archive shows
-  0.47% of rounds scoring exactly 0 (2.08% on round 5, 0% on rounds 1–2), but
-  those zeroes were earned under whatever curve was live in 2025, so they
-  cannot be converted into distances with this one. **A measured zero, with
-  its distance, is the single most valuable missing data point.**
+The family that does work makes **points lost** the power law, rather than
+points kept:
 
-**Honest status: the ladder is measured and confirmed; the curve rests on two
-consistent measured points, with a third unexplained outlier it does not fit.**
-`SCORE_EXPONENT` is the only constant that moves if more rounds turn up.
+```
+lost(d) = 100 · (d / D) ^ p        with p < 1
+```
+
+A sublinear exponent is what reconciles the two halves. Doubling a small error
+costs much less than double, so the curve can be strict at 500 km (11 points
+gone) and still generous at 3,820 km (only 42 gone) — the exact combination
+the old family could not express.
+
+### How tightly the two constants are pinned
+
+Fitting `D` and `p` jointly on all six rounds, the window that keeps five of
+them exact with the sixth within 2 is narrow: **`D` 14,205–14,430 km, `p`
+0.6485–0.6520**. `D = 14,300`, `p = 0.65` sits inside it.
+
+Leave-one-out is the real test, and it is reassuring — drop any single round,
+refit, and both constants barely move:
+
+| dropped | refit `D` | refit `p` | worst error on the five kept |
+|---|---|---|---|
+| Wolfsburg | 14,250 | 0.628 | 1 |
+| Fairbanks | 14,250 | 0.628 | 1 |
+| Samarkand | 14,250 | 0.628 | 1 |
+| Karakorum | 14,180 | 0.663 | **0** |
+| Santa Monica | 14,250 | 0.627 | 1 |
+| Nicosia | 15,170 | 0.616 | 1 |
+
+No round is carrying the fit. Only Nicosia — the sole anchor past 3,820 km, and
+so the only one holding the far end down — moves `D` by more than 1%, and even
+then by 6%. Compare the old one-parameter fit, where removing either `#786`
+round moved the exponent from 2.6 to over 4.
+
+Dropping Karakorum makes the remaining five exact, which is the sense in which
+it is the misfit round rather than the curve being wrong there — but at 2
+points off it is not worth a third fitted constant to chase.
+
+| Error | 40 km | 100 km | 362 km | 538 km | 1,022 km | 2,000 km | 3,820 km | 8,000 km | 13,060 km | 14,340 km |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Score | 100 | 97 | **92** | **89** | 82 (**80**) | 73 | **58** | 32 | **6** | 0 |
+
+### The bullseye is now assumed, not emergent
+
+The `− 40 km` in the numerator is the one number here that is **not** fitted,
+and it is the weakest claim in this document.
+
+The nearest measured round is Wolfsburg at 362 km, so nothing in the anchor
+set constrains the first few hundred km at all: refitting with the grace
+radius fixed anywhere from 0 to 80 km changes the residuals by less than a
+point. The anchors cannot see it.
+
+It is set from a different piece of evidence instead — the archive below,
+where 5–11% of rounds score exactly 100. The bare curve pays 100 only inside
+~4 km, which no plausible distribution of taps on a phone-sized globe reaches
+one round in ten. Some plateau has to exist; 40 km is metro-area scale, and
+it is close to the ~38 km the old curve happened to produce.
+
+This is a step down in rigour from v1.6, where the bullseye fell out of the
+curve for free. It is honest about which way the evidence points: the six
+anchors demand the new family, and the new family does not produce a bullseye
+on its own. **A measured round inside 200 km is the most valuable missing data
+point now** — it would pin the plateau down, and it is exactly the range a
+trainer spends most of its life in.
+
+### Where zero lands
+
+Zero now arrives at **14,340 km** rather than 17,410 km. That is a shorter
+extrapolation than before, not a longer one: the furthest measured round is
+Nicosia at 13,060 km scoring 6, so the curve is being read only 1,280 km past
+its last anchor instead of 4,350 km.
+
+It does mean more of the globe scores zero — about 19% of the surface, against
+4% under the old curve. Against the 2025 archive that is defensible rather
+than settled: 0.47% of all rounds scored exactly 0, rising to 2.08% on round
+5, and under this curve a round-5 p10 of 24 points corresponds to a 9,400 km
+miss, so a 2% tail past 14,340 km sits on a sensible continuation of the same
+distribution. Those zeroes were earned under whatever curve was live in 2025,
+so they cannot be converted into distances directly.
+
+**Honest status: the ladder is measured and confirmed; the curve's two
+constants are fitted on six rounds spanning 362–13,060 km and survive
+leave-one-out; the 40 km bullseye is inferred from the archive's rate of
+perfect rounds and is not measured.**
 
 ### For reference: the score distribution
 
@@ -165,8 +235,10 @@ one tier-3, so the ×3 rounds are the ones actually worth ×3.
   keeps `totalScore` as the sum of unweighted round scores and adds `points` /
   `maxPoints` alongside, so history written before multipliers existed still
   charts correctly.
-- **Distances show km and miles** on the reveal and the results rows, because
-  MapTap reports miles and the anchor above is a mileage figure.
+- **Distances are shown in miles** on the reveal and the results rows, because
+  that is the unit MapTap reports and four of the six anchors above are mileage
+  figures. Scoring still runs on kilometers internally; the conversion happens
+  where the text is drawn.
 - **Share text** uses MapTap's format: the total out of 1,000 plus one emoji
   per round. The emoji bands in `scoreEmoji` are read off the emoji→score
   ranges observed in the same archive (🎯/🔥 at 95+, down through 🧊 in the
@@ -184,5 +256,7 @@ one tier-3, so the ×3 rounds are the ones actually worth ×3.
   12 players, 2025-09-19 to 2025-12-09, 2,994 usable rounds, scraped from
   iMessage share texts
 - Measured (distance, score) rounds and the `Round: 3 (medium - points
-  doubled)` label — in-game reveal screenshots supplied by the user,
-  2026-08-16 (MapTap #786, plus one round shown on a different-looking screen)
+  doubled)` label — in-game reveal screenshots supplied by the user:
+  2026-08-16 (MapTap #786, distances in km; plus the Wolfsburg round shown in
+  miles) and 2026-08-18 (MapTap #788, distances in miles — Samarkand,
+  Karakorum, Fairbanks, the three that forced the refit)

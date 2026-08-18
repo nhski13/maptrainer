@@ -7,6 +7,7 @@ import {
   grade,
   ANTIPODAL_KM,
   BULLSEYE_KM,
+  ZERO_SCORE_KM,
   KM_PER_MILE,
   MAX_SCORE,
 } from '../src/core/geo';
@@ -48,7 +49,7 @@ describe('scoreForDistance', () => {
 
   it('is monotonically non-increasing', () => {
     let prev = MAX_SCORE;
-    for (const km of [20, 50, 100, 200, 400, 800, 1200, 5000, 20000]) {
+    for (const km of [20, 50, 100, 200, 400, 800, 1200, 5000, 14000, 20000]) {
       const s = scoreForDistance(km);
       expect(s).toBeLessThanOrEqual(prev);
       prev = s;
@@ -56,25 +57,36 @@ describe('scoreForDistance', () => {
   });
 
   // THE anchors: real MapTap rounds, read off the game's own reveal screen.
-  // The two modern ones (same build, same day) are what the curve is fitted
-  // to — one parameter, both reproduced exactly.
+  // Six of them, 362 km to 13,060 km. The curve has two fitted constants and
+  // reproduces five exactly; Karakorum is the one it misses, by 2.
   it('reproduces the measured MapTap rounds', () => {
+    expect(scoreForDistance(225 * KM_PER_MILE)).toBe(92); // Wolfsburg, 225 mi
+    expect(scoreForDistance(334 * KM_PER_MILE)).toBe(89); // Fairbanks, 334 mi
+    expect(scoreForDistance(336 * KM_PER_MILE)).toBe(89); // Samarkand, 336 mi
     expect(scoreForDistance(3820)).toBe(58); // Santa Monica
     expect(scoreForDistance(13060)).toBe(6); // Nicosia
   });
 
-  it('matches the curve at its reference distances', () => {
-    expect(scoreForDistance(500)).toBe(94);
-    expect(scoreForDistance(1000)).toBe(88);
-    expect(scoreForDistance(2000)).toBe(76);
-    expect(scoreForDistance(5000)).toBe(47);
-    expect(scoreForDistance(8000)).toBe(27);
-    expect(scoreForDistance(15000)).toBe(3);
+  it('is within 2 points on the one anchor it does not hit', () => {
+    // Karakorum, 635 mi → MapTap said 80, the curve says 82. No two-constant
+    // family tested does better across all six without giving up one of the
+    // exact hits above.
+    expect(scoreForDistance(635 * KM_PER_MILE)).toBeCloseTo(82, 0);
   });
 
-  it('is forgiving — MapTap does not punish country-scale misses', () => {
-    // A miss the width of Germany barely dents the score…
-    expect(scoreForDistance(400)).toBeGreaterThanOrEqual(94);
+  it('matches the curve at its reference distances', () => {
+    expect(scoreForDistance(100)).toBe(97);
+    expect(scoreForDistance(500)).toBe(89);
+    expect(scoreForDistance(1000)).toBe(83);
+    expect(scoreForDistance(2000)).toBe(73);
+    expect(scoreForDistance(5000)).toBe(50);
+    expect(scoreForDistance(8000)).toBe(32);
+    expect(scoreForDistance(12000)).toBe(11);
+  });
+
+  it('is forgiving in the middle of its range', () => {
+    // A miss the width of Germany costs single digits…
+    expect(scoreForDistance(400)).toBeGreaterThanOrEqual(90);
     // …and coast-to-coast across the USA is still a pass mark.
     expect(scoreForDistance(4000)).toBeGreaterThan(55);
   });
@@ -83,21 +95,21 @@ describe('scoreForDistance', () => {
     // Players do post zeroes, so the curve has to bottom out inside the
     // range of real misses — but not before a genuinely catastrophic one.
     expect(scoreForDistance(13000)).toBeGreaterThan(0);
-    expect(scoreForDistance(17410)).toBe(0);
+    expect(scoreForDistance(ZERO_SCORE_KM)).toBe(0);
   });
 
-  it('bottoms out exactly at the antipode and stays there', () => {
+  it('stays at zero past the antipode', () => {
     expect(scoreForDistance(ANTIPODAL_KM)).toBe(0);
     expect(scoreForDistance(ANTIPODAL_KM + 5000)).toBe(0);
   });
 
-  it('has a bullseye that falls out of the curve rather than being bolted on', () => {
-    // ~5–11% of real rounds score exactly 100, which needs a radius of
-    // tens of km — the exponent produces one without a piecewise branch.
+  it('has a metro-sized bullseye', () => {
+    // ~5–11% of real rounds score exactly 100, which needs a radius of tens
+    // of km — the bare curve alone would only pay 100 inside ~4 km.
     expect(BULLSEYE_KM).toBeGreaterThan(25);
     expect(BULLSEYE_KM).toBeLessThan(55);
-    expect(scoreForDistance(BULLSEYE_KM - 1)).toBe(MAX_SCORE);
-    expect(scoreForDistance(BULLSEYE_KM + 1)).toBeLessThan(MAX_SCORE);
+    expect(scoreForDistance(BULLSEYE_KM)).toBe(MAX_SCORE);
+    expect(scoreForDistance(BULLSEYE_KM * 4)).toBeLessThan(MAX_SCORE);
   });
 
   it('never goes below zero or above max', () => {

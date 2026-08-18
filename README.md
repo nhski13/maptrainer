@@ -99,25 +99,26 @@ and Practice.
 Because the multiplier rides on difficulty, Classic and Blitz queues run
 easy → hard rather than shuffled: the ×3 rounds are the ones worth ×3.
 
-**Distance curve.** `100 · (1 − d/20,015 km)^2.6` — the remaining fraction of
-the way to the far side of the planet, raised to a power. Fitted to rounds
-measured off MapTap's own reveal screen: **3,820 km → 58** and
-**13,060 km → 6**. Those two agree on the exponent to within 0.09, and one
-parameter reproduces both exactly.
+**Distance curve.** `100 · (1 − ((d − 40 km) / 14,300 km)^0.65)` — points
+*lost* grow as a sublinear power of the error, past a metro-sized bullseye.
+Two fitted constants, six rounds measured off MapTap's own reveal screen, five
+reproduced exactly:
 
-| Error | 38 km | 500 km | 2,000 km | 3,820 km | 8,000 km | 13,060 km | 17,410 km |
-|---|---|---|---|---|---|---|---|
-| Score | 100 | 94 | 76 | **58** | 27 | **6** | 0 |
+| Error | 40 km | 362 km | 538 km | 1,022 km | 2,000 km | 3,820 km | 8,000 km | 13,060 km | 14,340 km |
+|---|---|---|---|---|---|---|---|---|---|
+| Score | 100 | **92** | **89** | 82 (**80**) | 73 | **58** | 32 | **6** | 0 |
 
-MapTap is much gentler than it looks — a miss the width of Germany barely
-registers, and coast-to-coast across the USA is still a 58. The ~38 km bullseye
-falls out of the formula rather than being bolted on. Distances are shown in
-miles, since miles are what MapTap reports; the curve above is stated in km
-because that is what the app measures and scores in internally.
+MapTap is gentle in the middle and less so at the ends than it looks — a miss
+the width of Germany costs about 8 points, but coast-to-coast across the USA is
+still a 58. Distances are shown in miles, since miles are what MapTap reports;
+the curve above is stated in km because that is what the app measures and
+scores in internally.
 
-The far end is the weak spot: zero first appears at 17,410 km, but the furthest
-measured round is Nicosia at 13,060 km, so everything past that is
-extrapolation. A measured zero, with its distance, would pin it down.
+Two weak spots, both honest: the 40 km bullseye is inferred from how often real
+rounds score exactly 100, not measured — no anchor lies closer than 362 km. And
+zero first appears at 14,340 km against a furthest measured round of 13,060 km,
+so the last 1,280 km is extrapolation. A measured round inside 200 km, or a
+measured zero with its distance, would settle each.
 
 Grades run F → GOAT and are computed on the multiplier-weighted percentage, so
 blowing a ×3 round costs you a grade.
