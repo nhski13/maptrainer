@@ -16,7 +16,8 @@
   /* globe */
   --ocean: #0b1d33;
   --land: #22384f;
-  --border: rgba(140, 180, 220, 0.35);
+  --border: rgba(165, 205, 240, 0.5);
+  --border-sat: rgba(255, 255, 255, 0.45);
   --graticule: rgba(255, 255, 255, 0.05);
   --rim: rgba(120, 170, 255, 0.35);
   --pin: #ffb545;
