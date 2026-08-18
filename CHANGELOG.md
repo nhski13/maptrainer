@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.2 — 2026-08-18
+
+- **Miles only.** Every distance the app shows — the reveal card, the chip on
+  the miss line, the round list, the average error on the results screen and
+  the per-city "avg miss" in Stats — is now written in miles alone. The reveal
+  used to print both units side by side ("131 km · 81.6 mi"), which is two
+  numbers for one fact and neither of them is the one MapTap reports back to
+  you. Distances are still measured and scored in kilometers internally; the
+  conversion happens where the text is drawn.
+
 ## 1.8.1 — 2026-08-18
 
 - **Study mode's city list can be put away.** On a phone the list is a sheet

@@ -10,7 +10,7 @@ import {
   searchPacks,
   type CountryPack,
 } from './data/countries';
-import { formatKm, formatDistance, grade, scoreEmoji, type LatLon } from './core/geo';
+import { formatMiles, grade, scoreEmoji, type LatLon } from './core/geo';
 import {
   createSession,
   commitGuess,
@@ -695,7 +695,7 @@ function showRevealCard(screen: HTMLElement, r: RoundResult): void {
   screen.querySelector('.hud-bottom')?.setAttribute('hidden', '');
   const cls = r.score >= 80 ? 'good' : r.score >= 40 ? 'mid' : 'bad';
   const detail = r.guess
-    ? `${formatDistance(r.errorKm)} from ${esc(r.location.name)}`
+    ? `${formatMiles(r.errorKm)} from ${esc(r.location.name)}`
     : `Time's up — no pin placed`;
   const isOver = session!.finished;
   const quip = pickQuip(r.score, !r.guess);
@@ -774,7 +774,7 @@ function finishSession(): void {
           <div class="result-points"><strong>${points}</strong><span>/${cap}</span></div>
           <div class="result-total">
             ${s.results.length} rounds · avg ${Math.round(avg)}/100 ·
-            avg error ${formatKm(avgErr)}
+            avg error ${formatMiles(avgErr)}
           </div>
         </div>
         <div class="round-list"></div>
@@ -796,7 +796,7 @@ function finishSession(): void {
       el(`
         <div class="round-row">
           <div class="r-name">${esc(r.location.name)} <span>${esc(r.location.country)}</span></div>
-          <div class="r-km">${r.guess ? formatDistance(r.errorKm) : 'no pin'}</div>
+          <div class="r-dist">${r.guess ? formatMiles(r.errorKm) : 'no pin'}</div>
           <div class="r-score" style="color:${tone}">${r.score}</div>
           <div class="r-mult ${r.multiplier > 1 ? 'on' : ''}">×${r.multiplier}</div>
           <div class="r-points">${r.points}</div>
@@ -1007,7 +1007,7 @@ function showStats(): void {
             <td>${esc(l.name)}</td>
             <td>${esc(l.country)}</td>
             <td class="num">${Math.round(st.emaScore)}</td>
-            <td class="num">${formatKm(st.emaErrorKm)}</td>
+            <td class="num">${formatMiles(st.emaErrorKm)}</td>
           </tr>
         `),
       );
