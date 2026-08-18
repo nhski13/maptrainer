@@ -110,8 +110,9 @@ reproduced exactly:
 
 MapTap is gentle in the middle and less so at the ends than it looks — a miss
 the width of Germany costs about 8 points, but coast-to-coast across the USA is
-still a 58. Distances are shown in km *and* miles, since miles are what MapTap
-reports.
+still a 58. Distances are shown in miles, since miles are what MapTap reports;
+the curve above is stated in km because that is what the app measures and
+scores in internally.
 
 Two weak spots, both honest: the 40 km bullseye is inferred from how often real
 rounds score exactly 100, not measured — no anchor lies closer than 362 km. And

@@ -3,9 +3,7 @@ import {
   haversineKm,
   scoreForDistance,
   scoreEmoji,
-  formatKm,
   formatMiles,
-  formatDistance,
   grade,
   ANTIPODAL_KM,
   BULLSEYE_KM,
@@ -139,14 +137,6 @@ describe('scoreEmoji', () => {
   });
 });
 
-describe('formatKm', () => {
-  it('formats sub-km, precise, and large distances', () => {
-    expect(formatKm(0.4)).toBe('<1 km');
-    expect(formatKm(42.31)).toBe('42.3 km');
-    expect(formatKm(1234.6)).toBe('1,235 km');
-  });
-});
-
 describe('formatMiles', () => {
   it('converts and formats the way MapTap reports errors', () => {
     expect(formatMiles(0.5)).toBe('<1 mi');
@@ -154,8 +144,11 @@ describe('formatMiles', () => {
     expect(formatMiles(225 * KM_PER_MILE)).toBe('225 mi');
   });
 
-  it('pairs both units for the reveal', () => {
-    expect(formatDistance(225 * KM_PER_MILE)).toBe('362 km · 225 mi');
+  it('never mentions km — miles is the only unit shown', () => {
+    for (const km of [0.4, 42.31, 1234.6, 13060]) {
+      expect(formatMiles(km)).not.toContain('km');
+      expect(formatMiles(km)).toContain('mi');
+    }
   });
 });
 

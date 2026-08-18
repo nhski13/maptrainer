@@ -235,8 +235,10 @@ one tier-3, so the ×3 rounds are the ones actually worth ×3.
   keeps `totalScore` as the sum of unweighted round scores and adds `points` /
   `maxPoints` alongside, so history written before multipliers existed still
   charts correctly.
-- **Distances show km and miles** on the reveal and the results rows, because
-  MapTap reports miles and the anchor above is a mileage figure.
+- **Distances are shown in miles** on the reveal and the results rows, because
+  that is the unit MapTap reports and four of the six anchors above are mileage
+  figures. Scoring still runs on kilometers internally; the conversion happens
+  where the text is drawn.
 - **Share text** uses MapTap's format: the total out of 1,000 plus one emoji
   per round. The emoji bands in `scoreEmoji` are read off the emoji→score
   ranges observed in the same archive (🎯/🔥 at 95+, down through 🧊 in the
