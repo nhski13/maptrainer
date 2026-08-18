@@ -121,24 +121,16 @@ export function scoreEmoji(score: number, rand = Math.random): string {
 
 export const KM_PER_MILE = 1.609344;
 
-/** Human-friendly distance label. */
-export function formatKm(km: number): string {
-  if (km < 1) return '<1 km';
-  if (km < 100) return `${km.toFixed(1)} km`;
-  return `${Math.round(km).toLocaleString()} km`;
-}
-
-/** Same, in miles — the unit MapTap itself reports errors in. */
+/**
+ * Human-friendly distance label, in miles — the unit MapTap itself reports
+ * errors in, and the only unit this app shows. Distances are carried in km
+ * internally (haversine, scoring); conversion happens here at the edge.
+ */
 export function formatMiles(km: number): string {
   const mi = km / KM_PER_MILE;
   if (mi < 1) return '<1 mi';
   if (mi < 100) return `${mi.toFixed(1)} mi`;
   return `${Math.round(mi).toLocaleString()} mi`;
-}
-
-/** Both units, for the reveal — MapTap reports miles, the app thinks in km. */
-export function formatDistance(km: number): string {
-  return `${formatKm(km)} · ${formatMiles(km)}`;
 }
 
 /** Grade letter for a 0–100 average. */

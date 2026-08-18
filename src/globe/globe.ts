@@ -22,7 +22,7 @@ import { feature, mesh } from 'topojson-client';
 import type { Topology, GeometryCollection } from 'topojson-specification';
 import worldData from 'world-atlas/countries-110m.json';
 import earthUrl from '../assets/earth.jpg';
-import { formatKm, haversineKm, type LatLon } from '../core/geo';
+import { formatMiles, haversineKm, type LatLon } from '../core/geo';
 
 const world = worldData as unknown as Topology<{ countries: GeometryCollection }>;
 const land = feature(world, world.objects.countries);
@@ -1415,7 +1415,7 @@ export class Globe {
       const midPoint = { lon: mid[0], lat: mid[1] };
       if (this.isVisible(midPoint)) {
         const pt = this.projection([mid[0], mid[1]]);
-        if (pt) this.drawChip(pt[0], pt[1], formatKm(errorKm), lineColor, true);
+        if (pt) this.drawChip(pt[0], pt[1], formatMiles(errorKm), lineColor, true);
       }
     }
   }

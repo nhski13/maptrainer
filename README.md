@@ -111,8 +111,9 @@ parameter reproduces both exactly.
 
 MapTap is much gentler than it looks — a miss the width of Germany barely
 registers, and coast-to-coast across the USA is still a 58. The ~38 km bullseye
-falls out of the formula rather than being bolted on. Distances are shown in km
-*and* miles, since miles are what MapTap reports.
+falls out of the formula rather than being bolted on. Distances are shown in
+miles, since miles are what MapTap reports; the curve above is stated in km
+because that is what the app measures and scores in internally.
 
 The far end is the weak spot: zero first appears at 17,410 km, but the furthest
 measured round is Nicosia at 13,060 km, so everything past that is
