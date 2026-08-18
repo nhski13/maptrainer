@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.9.0 — 2026-08-18
+
+- **The distance curve is refitted, and this time the shape changed, not just
+  a number.** Three new rounds read off MapTap's reveal screen (Samarkand
+  336 mi → 89, Karakorum 635 mi → 80, Fairbanks 334 mi → 89, all from
+  `MapTap #788`) landed exactly where the old curve was weakest: close in. The
+  old model scored them 93, 87 and 93. It had a known outlier in the same
+  range — Wolfsburg, 225 mi → 92, scored 95 — and the new rounds show that was
+  never an outlier at all, but the first sight of a part of the curve the old
+  family had the wrong shape for.
+
+  Scoring is now `100 · (1 − ((d − 40 km) / 14,300 km)^0.65)`: **points lost**
+  follow a sublinear power of the error, rather than points kept following a
+  power of the remaining distance to the antipode. That is the only form
+  tested that can be strict at 500 km and generous at 3,820 km at once. It
+  reproduces five of the six measured rounds exactly, worst error 2, and
+  survives leave-one-out — against a worst error of 7 for the old curve.
+
+  In practice: near misses cost more than they used to (500 km was 94, now
+  89), the middle of the range is barely touched, and zero now arrives at
+  14,340 km instead of 17,410 km — 1,280 km past the furthest measured round
+  rather than 4,350 km past it.
+- **The bullseye is now an explicit 40 km rather than a side effect.** The new
+  curve on its own only pays 100 inside about 4 km, which cannot explain the
+  5–11% of real rounds that score exactly 100, so the plateau is stated rather
+  than hoped for. It is the least certain number in the model and is labelled
+  that way in both `src/core/geo.ts` and `docs/scoring.md`: no measured round
+  lies closer than 362 km, and any radius from 0 to 80 km fits the anchors
+  equally well.
+- `docs/scoring.md` gains the full refit — all six anchors, why the family had
+  to change, the fitted window for both constants, and a leave-one-out table.
+
 ## 1.8.2 — 2026-08-18
 
 - **Country borders read a little more clearly.** Over the satellite imagery

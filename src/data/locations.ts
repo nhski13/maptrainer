@@ -5,7 +5,7 @@ import type { Location } from './types';
  * state capitals — the location classes MapTap.gg draws from (capitals, major
  * cities, US states, regional packs).
  *
- * Coordinates are city centers, accurate to well within the 15 km scoring
+ * Coordinates are city centers, accurate to well within the 40 km scoring
  * bullseye. Tiers: 1 = famous, 2 = solid-geographer, 3 = deep-cut.
  */
 
