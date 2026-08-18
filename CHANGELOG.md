@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.2 — 2026-08-18
+
+- **Country borders read a little more clearly.** Over the satellite imagery
+  and on the vector fallback alike, the border lines were thin and dim enough
+  to disappear against busy terrain. They are now a touch wider and a touch
+  brighter — still a hairline rather than an outline, but one you can follow
+  without hunting for it. The satellite border colour is now a `--border-sat`
+  variable alongside `--border`, so both are tunable from one place.
+
 ## 1.8.1 — 2026-08-18
 
 - **Study mode's city list can be put away.** On a phone the list is a sheet

@@ -1274,8 +1274,8 @@ export class Globe {
       // subtle country borders over imagery
       ctx.beginPath();
       path(borders);
-      ctx.strokeStyle = c('--border-sat', 'rgba(255,255,255,0.30)');
-      ctx.lineWidth = 0.7;
+      ctx.strokeStyle = c('--border-sat', 'rgba(255,255,255,0.45)');
+      ctx.lineWidth = 0.9;
       ctx.stroke();
     } else {
       // flat vector fallback (texture loading, or no WebGL)
@@ -1297,8 +1297,8 @@ export class Globe {
 
       ctx.beginPath();
       path(borders);
-      ctx.strokeStyle = c('--border', 'rgba(140,180,220,0.35)');
-      ctx.lineWidth = 0.6;
+      ctx.strokeStyle = c('--border', 'rgba(165,205,240,0.5)');
+      ctx.lineWidth = 0.8;
       ctx.stroke();
     }
 
