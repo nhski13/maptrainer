@@ -31,6 +31,8 @@ const graticule = geoGraticule10();
 
 export interface GlobeCallbacks {
   onPin?: (p: LatLon) => void;
+  /** Any tap on the globe, pin or no pin — study mode uses it to shed its sheet. */
+  onTap?: () => void;
 }
 
 interface Reveal {
@@ -969,6 +971,9 @@ export class Globe {
   }
 
   private handleTap(x: number, y: number): void {
+    // Reaching past an overlay to touch the map is a statement about the
+    // overlay, so the tap is reported whether or not it drops a pin.
+    this.callbacks.onTap?.();
     // Rotation and zoom stay live during a reveal so you can inspect the
     // answer; only dropping a new pin is locked out. Study mode passes no
     // onPin at all — there is nothing to guess, so a tap there should not

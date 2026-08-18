@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.1 — 2026-08-18
+
+- **Study mode's city list can be put away.** On a phone the list is a sheet
+  across the bottom of the globe, and it was covering the half of the country
+  you had just asked to look at with no way to move it. It now has a grip:
+  tap it, swipe it down, or press Escape and the list folds to a single bar,
+  which then names whichever city you were reading about. Tapping the map
+  itself does the same thing — reaching past an overlay to touch what's under
+  it is a statement about the overlay. Swipe the bar back up, tap it, or press
+  an arrow key to bring the list back.
+- Folding the sheet away re-frames the country into the space that just opened
+  up, rather than leaving it hunched above where the sheet used to be.
+
 ## 1.8.0 — 2026-08-17
 
 - **Train by country.** Pick India and work through its top 25 cities, or any

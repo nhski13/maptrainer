@@ -35,7 +35,10 @@ once — every city dotted and labelled, the country framed to fit, the list
 beside it. Tap a city and the globe flies there and zooms to street scale;
 arrow keys walk the list. Labels go down biggest-city-first and any that would
 collide is dropped, so zooming in is what brings the rest back. Nothing is
-scored, nothing is timed, and *Quiz me on these* is one tap away.
+scored, nothing is timed, and *Quiz me on these* is one tap away. On a phone
+the list is a sheet across the bottom, so it folds away — tap or swipe down its
+grip, press Escape, or just tap the map — leaving a single bar that names the
+city you're looking at and brings the list back when you tap it.
 
 Country packs reuse the curated corpus rather than duplicating it — India's
 pack points at the same `mumbai` entry every other mode uses, so a city's
