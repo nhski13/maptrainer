@@ -363,11 +363,16 @@ function showStudy(pack: CountryPack): void {
         </div>
       </div>
       <div class="study-panel">
-        <div class="study-hint">Tap a city to fly there · drag and pinch to explore</div>
-        <div class="study-list"></div>
-        <div class="study-actions">
-          <button class="btn ghost frame-all">Show all</button>
-          <button class="btn primary quiz-now">Quiz me on these</button>
+        <button class="study-grip" type="button" aria-expanded="true" aria-controls="study-body">
+          <span class="grip-bar"></span>
+          <span class="grip-label"></span>
+        </button>
+        <div class="study-body" id="study-body">
+          <div class="study-list"></div>
+          <div class="study-actions">
+            <button class="btn ghost frame-all">Show all</button>
+            <button class="btn primary quiz-now">Quiz me on these</button>
+          </div>
         </div>
       </div>
       <div class="attribution">
@@ -396,12 +401,27 @@ function showStudy(pack: CountryPack): void {
     list.appendChild(row);
   });
 
+  const panel = screen.querySelector<HTMLElement>('.study-panel')!;
+  const grip = screen.querySelector<HTMLElement>('.study-grip')!;
+  const gripLabel = screen.querySelector<HTMLElement>('.grip-label')!;
   const container = screen.querySelector<HTMLElement>('.globe-container')!;
+
   setScreen(screen, 'train');
-  globe = new Globe(container);
+  // Tapping the map itself folds the sheet away: on a phone the thing you
+  // just reached past the list to touch is the thing you want to see.
+  globe = new Globe(container, {
+    onTap: () => {
+      if (isSheet()) setCollapsed(true);
+    },
+  });
 
   const markers = cities.map((c) => ({ lat: c.lat, lon: c.lon, label: c.name }));
   let selected = -1;
+
+  /** True when the list is a sheet across the globe, not a column beside it. */
+  function isSheet(): boolean {
+    return panel.getBoundingClientRect().width > container.clientWidth * 0.8;
+  }
 
   function select(i: number): void {
     selected = i;
@@ -411,27 +431,80 @@ function showStudy(pack: CountryPack): void {
     globe?.prefetchAround(city);
     globe?.focusOn(city, Globe.CITY_ZOOM);
     rows[i].scrollIntoView({ block: 'nearest' });
+    syncGrip();
   }
-
-  const panel = screen.querySelector<HTMLElement>('.study-panel')!;
 
   function showAll(): void {
     selected = -1;
     rows.forEach((r) => r.classList.remove('on'));
     globe?.setMarkers(markers, -1);
     // On a phone the list is a sheet across the bottom of the globe rather
-    // than a column beside it; tell the framing how much it hides.
-    const sheet = panel.getBoundingClientRect();
-    const covers = sheet.width > container.clientWidth * 0.8 ? sheet.height + 16 : 0;
+    // than a column beside it; tell the framing how much it hides. Collapsed,
+    // that is only the grip, so the country gets the screen back.
+    const covers = isSheet() ? panel.getBoundingClientRect().height + 16 : 0;
     globe?.frameAll(cities, covers);
+    syncGrip();
   }
+
+  /** The grip doubles as the hint when open and as the handle back when shut. */
+  function syncGrip(): void {
+    const collapsed = panel.classList.contains('collapsed');
+    if (!collapsed) {
+      gripLabel.textContent = 'Tap a city to fly there · drag and pinch to explore';
+      grip.title = 'Hide the city list';
+      return;
+    }
+    gripLabel.textContent = selected < 0
+      ? `Show the ${cities.length} cities`
+      : `${selected + 1} · ${cities[selected].name}`;
+    grip.title = 'Show the city list';
+  }
+
+  function setCollapsed(next: boolean): void {
+    if (panel.classList.contains('collapsed') === next) return;
+    panel.classList.toggle('collapsed', next);
+    grip.setAttribute('aria-expanded', String(!next));
+    // The panel's footprint just changed, so a framing that dodged it is stale.
+    if (selected < 0) showAll();
+    else syncGrip();
+  }
+
+  // Tap the grip to toggle; swipe it down to shut the sheet, up to reopen it.
+  let swipeFrom = 0;
+  let swiped = false;
+  grip.addEventListener('pointerdown', (e) => {
+    swipeFrom = e.clientY;
+    swiped = false;
+    grip.setPointerCapture(e.pointerId);
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (!grip.hasPointerCapture(e.pointerId)) return;
+    const dy = e.clientY - swipeFrom;
+    if (Math.abs(dy) < 18) return;
+    swiped = true; // swallow the click this drag is about to produce
+    grip.releasePointerCapture(e.pointerId);
+    setCollapsed(dy > 0);
+  });
+  grip.addEventListener('click', () => {
+    if (swiped) {
+      swiped = false;
+      return;
+    }
+    setCollapsed(!panel.classList.contains('collapsed'));
+  });
 
   screen.querySelector('.frame-all')!.addEventListener('click', showAll);
   showAll();
 
   keyHandler = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && !panel.classList.contains('collapsed')) {
+      e.preventDefault();
+      setCollapsed(true);
+      return;
+    }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     e.preventDefault();
+    setCollapsed(false);
     const step = e.key === 'ArrowDown' ? 1 : -1;
     select((selected + step + cities.length) % cities.length);
   };

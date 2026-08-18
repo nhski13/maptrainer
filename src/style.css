@@ -897,11 +897,59 @@ table.weak-table {
   left: 10px;
 }
 
-.study-hint {
-  font-size: 10px;
+/* A panel laid over the map has to be dismissable, or the country you came to
+   look at spends the lesson behind the index to it. The grip is both the hint
+   and the way out: tap it, or swipe it down, and the list folds to this bar. */
+.study-grip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 4px 8px;
+  border: none;
+  background: none;
   color: var(--ink-3);
-  padding: 0 4px 8px;
+  font-size: 10px;
+  line-height: 1.3;
   text-align: center;
+  cursor: pointer;
+  touch-action: none; /* the vertical swipe is ours, not the browser's */
+}
+
+.grip-bar {
+  width: 34px;
+  height: 4px;
+  flex: none;
+  border-radius: 999px;
+  background: rgba(120, 170, 255, 0.35);
+}
+
+.study-grip:hover .grip-bar {
+  background: var(--accent);
+}
+
+.study-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Collapsed, the panel is only its grip — a thin bar the map reads through. */
+.study-panel.collapsed {
+  max-height: none;
+  padding-bottom: 2px;
+}
+
+.study-panel.collapsed .study-body {
+  display: none;
+}
+
+.study-panel.collapsed .grip-label {
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: 12px;
 }
 
 .study-list {
