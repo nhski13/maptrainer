@@ -18,6 +18,8 @@
   --land: #22384f;
   --border: rgba(165, 205, 240, 0.5);
   --border-sat: rgba(255, 255, 255, 0.45);
+  --state: rgba(165, 205, 240, 0.34);
+  --state-sat: rgba(255, 255, 255, 0.3);
   --graticule: rgba(255, 255, 255, 0.05);
   --rim: rgba(120, 170, 255, 0.35);
   --pin: #ffb545;

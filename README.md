@@ -154,7 +154,7 @@ Sentinel-2 detail. **Frame both** and **Zoom to answer** replay either beat.
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # vitest suite (92 tests)
+npm test         # vitest suite (103 tests)
 npm run build    # typecheck + production build
 ```
 
@@ -172,6 +172,17 @@ tile zoom 8, Pro at 10):
   family MapTap serves) stream in up to WGS84 zoom 10 (~76 m/px) and are
   composited over the base in the fragment shader. Offline or on tile
   failure the base texture simply stays — the game never breaks.
+- Each detail patch is seeded from the one it replaces, so crossing a zoom
+  band never shows less than what was already on screen, and patches fade out
+  on the way back to globe scale rather than being cut.
+
+**Vector overlay**: country borders from
+[world-atlas](https://github.com/topojson/world-atlas) at 1:110m, and — inside
+the United States — state lines at 1:10m, faded in between 1.6× and 2.8× zoom.
+Regenerate the state mesh with `node scripts/build-state-lines.mjs` (see the
+script header). It ships as interior boundaries only: coastlines and the
+Canadian and Mexican frontiers are the country layer's job, and dropping them
+is three quarters of the source by point count.
 
 ## Architecture
 
@@ -185,6 +196,7 @@ src/
   data/cities.ts    generated country packs: 120 countries, 2,330 more cities
   data/countries.ts pack resolution, country search
   data/drills.ts    drill pool definitions
+  data/state-lines.ts generated US state boundary mesh (interior lines only)
   globe/globe.ts    canvas globe: drag-rotate, pinch/scroll zoom, tap-to-pin
   main.ts           screens, HUD, timers, game loop
 ```

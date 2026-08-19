@@ -22,6 +22,7 @@ import { feature, mesh } from 'topojson-client';
 import type { Topology, GeometryCollection } from 'topojson-specification';
 import worldData from 'world-atlas/countries-110m.json';
 import earthUrl from '../assets/earth.jpg';
+import { stateLines, stateLinesCap } from '../data/state-lines';
 import { formatMiles, haversineKm, type LatLon } from '../core/geo';
 
 const world = worldData as unknown as Topology<{ countries: GeometryCollection }>;
@@ -57,6 +58,13 @@ const ANSWER_ZOOM = 20;
 const REVEAL_FLY_DELAY_MS = 1400;
 /** Pin-drop animation length. */
 const DROP_MS = 520;
+/**
+ * Zoom band over which state lines come up. At 1x the lower 48 is a couple of
+ * hundred pixels wide and forty-nine extra outlines is a smudge; by the time
+ * the view is close enough for a state to mean something, they are fully there.
+ */
+const STATE_LINES_FROM = 1.6;
+const STATE_LINES_FULL = 2.8;
 
 // ── Sentinel-2 detail tiles (same imagery family MapTap serves) ───────
 // EOX s2cloudless, WGS84 grid, CORS-enabled, attribution required.
@@ -85,6 +93,8 @@ const WARM_ENTRY_LEVELS = 2;
 const WARM_LOOKAHEAD_LEVELS = 2;
 /** Zoom ratio the level sweep steps by — fine enough not to skip a band. */
 const LEVEL_SWEEP_STEP = 1.08;
+/** Length of the patch cross-fade, in and out. */
+const PATCH_FADE_MS = 180;
 
 // ── WebGL satellite layer ─────────────────────────────────────────────
 
@@ -145,7 +155,7 @@ void main() {
 `;
 
 /** Degree-space bounds of a detail patch. */
-interface PatchBounds {
+export interface PatchBounds {
   lonMin: number; // may extend past ±180 (continuous, unwrapped)
   latMax: number;
   lonSpan: number;
@@ -162,6 +172,7 @@ class SatelliteLayer {
   private uPatchAlpha: WebGLUniformLocation | null = null;
   private patchTex: WebGLTexture | null = null;
   private patchBounds: PatchBounds | null = null;
+  private patchSource: HTMLCanvasElement | null = null;
   patchAlpha = 0;
   ready = false;
   failed = false;
@@ -275,15 +286,28 @@ class SatelliteLayer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     this.patchBounds = bounds;
+    this.patchSource = source;
   }
 
   clearPatch(): void {
     this.patchBounds = null;
+    this.patchSource = null;
     this.patchAlpha = 0;
   }
 
   hasPatch(): boolean {
     return this.patchBounds !== null;
+  }
+
+  /**
+   * The imagery currently on the globe, for seeding the patch that replaces
+   * it. Whatever it holds is real detail at some level, which is more than the
+   * base texture has, so it is worth carrying forward even mid-fade.
+   */
+  currentPatch(): PriorPatch | null {
+    return this.patchSource && this.patchBounds
+      ? { canvas: this.patchSource, bounds: this.patchBounds }
+      : null;
   }
 
   /** All spatial args in device pixels; ty measured from the top. */
@@ -566,6 +590,60 @@ export function baseCropSlices(lonMin: number, lonSpan: number, w: number): Crop
   return slices;
 }
 
+/** The patch already on the globe — pixels plus the ground they cover. */
+export interface PriorPatch {
+  canvas: HTMLCanvasElement;
+  bounds: PatchBounds;
+}
+
+/** A `drawImage` of one patch into another: source rect → destination rect. */
+export interface PatchReuse {
+  sx: number;
+  sy: number;
+  sw: number;
+  sh: number;
+  dx: number;
+  dy: number;
+  dw: number;
+  dh: number;
+}
+
+/**
+ * Where an existing patch's pixels land inside a new one, or null if the two
+ * cover no common ground. Both are plate-carree over their own bounds, so this
+ * is a plain rectangle mapping; the one subtlety is longitude, which each
+ * patch carries unwrapped in its own turn around the globe — a patch at 190E
+ * and a patch at -170E are over the same water — so the ranges have to be
+ * brought into a common turn before they can be compared.
+ */
+export function patchReuse(
+  prev: PatchBounds,
+  prevW: number,
+  prevH: number,
+  next: PatchBounds,
+  nextW: number,
+  nextH: number,
+): PatchReuse | null {
+  const turns = Math.round((next.lonMin - prev.lonMin) / 360);
+  const prevLonMin = prev.lonMin + turns * 360;
+  const lonA = Math.max(prevLonMin, next.lonMin);
+  const lonB = Math.min(prevLonMin + prev.lonSpan, next.lonMin + next.lonSpan);
+  if (lonB - lonA <= 0) return null;
+  const latTop = Math.min(prev.latMax, next.latMax);
+  const latBot = Math.max(prev.latMax - prev.latSpan, next.latMax - next.latSpan);
+  if (latTop - latBot <= 0) return null;
+  return {
+    sx: ((lonA - prevLonMin) / prev.lonSpan) * prevW,
+    sy: ((prev.latMax - latTop) / prev.latSpan) * prevH,
+    sw: ((lonB - lonA) / prev.lonSpan) * prevW,
+    sh: ((latTop - latBot) / prev.latSpan) * prevH,
+    dx: ((lonA - next.lonMin) / next.lonSpan) * nextW,
+    dy: ((next.latMax - latTop) / next.latSpan) * nextH,
+    dw: ((lonB - lonA) / next.lonSpan) * nextW,
+    dh: ((latTop - latBot) / next.latSpan) * nextH,
+  };
+}
+
 /**
  * Paint the patch's own region of the blurry base texture, upscaled, as the
  * canvas's starting content. Tiles then land on top of it. That is what makes
@@ -593,9 +671,23 @@ function drawBaseCrop(
   }
 }
 
+/**
+ * A patch canvas to build into, pre-filled with the best imagery already on
+ * hand: the blurry base crop everywhere, and on top of it whatever the patch
+ * currently on the globe covers of the same ground.
+ *
+ * That second layer is what stops a zoom from flashing. A new patch takes a
+ * moment to fetch, and until this it started life as nothing but the upscaled
+ * base texture — so crossing a zoom band threw away the sharp imagery already
+ * on screen, showed blur for as long as the tiles took, then snapped back to
+ * sharp. Seeded from its predecessor, the worst a half-loaded patch can look
+ * is exactly what it replaced, and every tile that lands is an improvement on
+ * it rather than a recovery from a step backwards.
+ */
 function newPatchCanvas(
   plan: DetailPlan,
   base: HTMLImageElement | null,
+  prior: PriorPatch | null,
 ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement('canvas');
   canvas.width = plan.cols * TILE_PX;
@@ -603,6 +695,17 @@ function newPatchCanvas(
   const ctx = canvas.getContext('2d')!;
   ctx.imageSmoothingQuality = 'high';
   drawBaseCrop(ctx, base, plan.bounds, canvas.width, canvas.height);
+  if (prior) {
+    const r = patchReuse(
+      prior.bounds,
+      prior.canvas.width,
+      prior.canvas.height,
+      plan.bounds,
+      canvas.width,
+      canvas.height,
+    );
+    if (r) ctx.drawImage(prior.canvas, r.sx, r.sy, r.sw, r.sh, r.dx, r.dy, r.dw, r.dh);
+  }
   return { canvas, ctx };
 }
 
@@ -614,6 +717,7 @@ function newPatchCanvas(
 function compositeCached(
   plan: DetailPlan,
   base: HTMLImageElement | null,
+  prior: PriorPatch | null,
 ): HTMLCanvasElement | null {
   const have: { img: HTMLImageElement; cx: number; ry: number }[] = [];
   let complete = true;
@@ -624,7 +728,7 @@ function compositeCached(
     else complete = false;
   });
   if (!complete) return null;
-  const { canvas, ctx } = newPatchCanvas(plan, base);
+  const { canvas, ctx } = newPatchCanvas(plan, base, prior);
   for (const t of have) ctx.drawImage(t.img, t.cx * TILE_PX, t.ry * TILE_PX);
   return canvas;
 }
@@ -637,9 +741,10 @@ function compositeCached(
 async function buildPatch(
   plan: DetailPlan,
   base: HTMLImageElement | null,
+  prior: PriorPatch | null,
   onProgress?: (canvas: HTMLCanvasElement) => void,
 ): Promise<HTMLCanvasElement> {
-  const { canvas, ctx } = newPatchCanvas(plan, base);
+  const { canvas, ctx } = newPatchCanvas(plan, base, prior);
   let landed = 0;
   const jobs: Promise<void>[] = [];
   eachTile(plan, (row, col, ry, cx) => {
@@ -650,7 +755,7 @@ async function buildPatch(
           landed++;
           onProgress?.(canvas);
         })
-        .catch(() => undefined), // leave the base crop showing for this tile
+        .catch(() => undefined), // leave whatever was already there showing
     );
   });
   await Promise.all(jobs);
@@ -685,6 +790,7 @@ export class Globe {
   private detailToken = 0;
   private appliedDetailKey = '';
   private fadeRaf = 0;
+  private patchFading = false;
   private warmedAheadKey = '';
   private warmedViewKey = '';
   private lastCachedApply = 0;
@@ -1155,6 +1261,10 @@ export class Globe {
   private applyCachedDetail(): void {
     if (!this.sat.ready || this.sat.failed) return;
     if (this.zoom < DETAIL_ZOOM_THRESHOLD) return;
+    // Zoomed back in while the patch was on its way out — catch it and bring
+    // it back up rather than letting the fade run to the drop it was heading
+    // for, which would blur the globe under a view that wants detail again.
+    if (this.patchFading) this.fadePatchIn();
     const now = performance.now();
     if (now - this.lastCachedApply < CACHED_APPLY_MS) return;
     // Charge the throttle for the attempt, not just the hit: a drag fires this
@@ -1165,7 +1275,7 @@ export class Globe {
     if (!plan) return;
     const key = planKey(plan);
     if (key === this.appliedDetailKey) return;
-    const canvas = compositeCached(plan, this.sat.baseImage);
+    const canvas = compositeCached(plan, this.sat.baseImage, this.sat.currentPatch());
     if (!canvas) return;
     this.detailToken++; // any in-flight build is for a view we've moved past
     this.sat.setPatch(canvas, plan.bounds);
@@ -1180,11 +1290,7 @@ export class Globe {
   private updateDetail(): void {
     if (!this.sat.ready || this.sat.failed) return;
     if (this.zoom < DETAIL_ZOOM_THRESHOLD) {
-      if (this.sat.hasPatch()) {
-        this.sat.clearPatch();
-        this.appliedDetailKey = '';
-        this.requestRenderOnly();
-      }
+      if (this.sat.hasPatch() && !this.patchFading) this.fadePatchOut();
       // Idle at globe scale: line up the first zoom step for wherever the
       // view is now pointing.
       this.warmView();
@@ -1197,7 +1303,7 @@ export class Globe {
     if (key === this.appliedDetailKey) return; // already showing this patch
     const token = ++this.detailToken;
     let lastPaint = 0;
-    void buildPatch(plan, this.sat.baseImage, (canvas) => {
+    void buildPatch(plan, this.sat.baseImage, this.sat.currentPatch(), (canvas) => {
       // Show the patch filling in rather than holding everything back until
       // the slowest tile of the batch arrives — throttled, since each paint
       // is a texture upload.
@@ -1223,13 +1329,40 @@ export class Globe {
   /** Fade the freshly-loaded patch in over ~180 ms. */
   private fadePatchIn(): void {
     cancelAnimationFrame(this.fadeRaf);
+    this.patchFading = false;
     const t0 = performance.now();
     const from = this.sat.patchAlpha;
     const step = (now: number): void => {
-      const t = Math.min(1, (now - t0) / 180);
+      const t = Math.min(1, (now - t0) / PATCH_FADE_MS);
       this.sat.patchAlpha = from + (1 - from) * t;
       this.requestRenderOnly();
       if (t < 1) this.fadeRaf = requestAnimationFrame(step);
+    };
+    this.fadeRaf = requestAnimationFrame(step);
+  }
+
+  /**
+   * Fade the patch out on the way back to globe scale, and only drop it once
+   * it is invisible. Clearing it the instant the zoom crossed the threshold
+   * was a hard cut from sharp imagery to blurry — the fade-in's own flash,
+   * played backwards.
+   */
+  private fadePatchOut(): void {
+    cancelAnimationFrame(this.fadeRaf);
+    this.patchFading = true;
+    const t0 = performance.now();
+    const from = this.sat.patchAlpha;
+    const step = (now: number): void => {
+      const t = Math.min(1, (now - t0) / PATCH_FADE_MS);
+      this.sat.patchAlpha = from * (1 - t);
+      this.requestRenderOnly();
+      if (t < 1) {
+        this.fadeRaf = requestAnimationFrame(step);
+        return;
+      }
+      this.patchFading = false;
+      this.sat.clearPatch();
+      this.appliedDetailKey = '';
     };
     this.fadeRaf = requestAnimationFrame(step);
   }
@@ -1277,6 +1410,7 @@ export class Globe {
       ctx.strokeStyle = c('--border-sat', 'rgba(255,255,255,0.45)');
       ctx.lineWidth = 0.9;
       ctx.stroke();
+      this.drawStateLines(path, c('--state-sat', 'rgba(255,255,255,0.3)'), 0.7);
     } else {
       // flat vector fallback (texture loading, or no WebGL)
       ctx.beginPath();
@@ -1300,6 +1434,7 @@ export class Globe {
       ctx.strokeStyle = c('--border', 'rgba(165,205,240,0.5)');
       ctx.lineWidth = 0.8;
       ctx.stroke();
+      this.drawStateLines(path, c('--state', 'rgba(165,205,240,0.34)'), 0.6);
     }
 
     // globe rim
@@ -1312,6 +1447,37 @@ export class Globe {
     if (this.markers.length > 0) this.renderMarkers();
     if (this.reveal) this.renderReveal(path);
     else if (this.pin) this.drawMarker(this.pin, c('--pin', '#ffb545'));
+  }
+
+  /**
+   * US state lines, thinner and dimmer than the national borders they sit
+   * inside, and faded in with zoom so they arrive as the view gets close
+   * enough for a state boundary to be worth telling apart from a country's.
+   *
+   * The path is skipped outright when the lower 48 cannot be on the near
+   * hemisphere at all — nine frames in ten of a globe being dragged around
+   * Eurasia, and the mesh is the most detailed vector the app draws.
+   */
+  private drawStateLines(
+    path: ReturnType<typeof geoPath>,
+    color: string,
+    lineWidth: number,
+  ): void {
+    const span = STATE_LINES_FULL - STATE_LINES_FROM;
+    const alpha = Math.min(1, (this.zoom - STATE_LINES_FROM) / span);
+    if (alpha <= 0) return;
+    const centre: [number, number] = [-this.rotation[0], -this.rotation[1]];
+    if (geoDistance(stateLinesCap.center, centre) > stateLinesCap.radius + Math.PI / 2) return;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    path(stateLines);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+    ctx.restore();
   }
 
   /**
