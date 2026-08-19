@@ -152,6 +152,24 @@ export function formatMiles(km: number): string {
   return `${Math.round(mi).toLocaleString()} mi`;
 }
 
+/**
+ * Population, at the precision the number is actually known to. Gazetteer
+ * figures are census counts of varying vintage rounded by their own sources,
+ * so "1,275,857" claims an accuracy nobody has for a city; two significant
+ * figures is the honest reading and the easier one to hold in your head.
+ * Under ten thousand the exact count is small enough to be worth printing.
+ */
+export function formatPopulation(pop: number): string {
+  // Thresholds sit where the *rounded* figure crosses, not the raw one, so
+  // nothing ever prints as "1000k" or "10.0M".
+  if (pop >= 999_500) {
+    const m = pop / 1_000_000;
+    return `${m >= 9.95 ? Math.round(m) : m.toFixed(1)}M`;
+  }
+  if (pop >= 10_000) return `${Math.round(pop / 1000)}k`;
+  return pop.toLocaleString();
+}
+
 /** Grade letter for a 0–100 average. */
 export function grade(avg: number): string {
   if (avg >= 97) return 'GOAT';

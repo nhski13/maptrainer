@@ -340,6 +340,10 @@ const cityLines = packCities
       `  C(${q(c.id)}, ${q(c.name)}, ${q(c.country)}, ${c.lat}, ${c.lon}, ${c.tier}, '${c.continent}'),`,
   )
   .join('\n');
+// Populations are not written here. They come from GeoNames rather than the
+// SimpleMaps figures this script ranks by, and they also have to be applied to
+// locations.ts, so one pass owns both files: run scripts/backfill-populations.mjs
+// after regenerating this one.
 
 const packLines = packs
   .map((p) => {
@@ -363,6 +367,7 @@ const out = `import type { Location } from './types';
  * GENERATED FILE — do not edit by hand. Rebuild with:
  *   npm i --no-save all-the-cities city-timezones countries-list
  *   node scripts/build-country-packs.mjs
+ *   node scripts/backfill-populations.mjs   # re-adds the population column
  *
  * ${packs.length} countries · ${totalRanked} ranked cities · ${packCities.length} new to the corpus.
  *

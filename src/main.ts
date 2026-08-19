@@ -10,7 +10,7 @@ import {
   searchPacks,
   type CountryPack,
 } from './data/countries';
-import { formatMiles, grade, scoreEmoji, type LatLon } from './core/geo';
+import { formatMiles, formatPopulation, grade, scoreEmoji, type LatLon } from './core/geo';
 import {
   createSession,
   commitGuess,
@@ -699,16 +699,27 @@ function showRevealCard(screen: HTMLElement, r: RoundResult): void {
     : `Time's up — no pin placed`;
   const isOver = session!.finished;
   const quip = pickQuip(r.score, !r.guess);
-  // With a multiplier in play, the raw score and the points are different
-  // numbers and both matter — show the arithmetic rather than one or other.
+  // The headline is the round score out of 100 — the number that says how good
+  // the tap was, and the one MapTap reports back. Points are what the
+  // multiplier turns it into, which matters for the session total but is not a
+  // measure of the tap: a 96 on a x2 round is the same throw as a 96 on a x1.
+  // So the skill number is the big one and the arithmetic sits under it.
   const scoreLine =
     r.multiplier > 1
-      ? `+${r.points}<span class="reveal-math">${r.score} × ${r.multiplier}</span>`
-      : `+${r.points}`;
+      ? `${r.score}<span class="reveal-math">× ${r.multiplier} = ${r.points} points</span>`
+      : `${r.score}`;
+  // A city's size is the context that makes a miss make sense — a 60-mile miss
+  // on a place of eight million is a different mistake from the same miss on a
+  // town of forty thousand. Absent for the handful of entries no gazetteer
+  // gives a figure for, and the line simply doesn't appear.
+  const popLine = r.location.pop
+    ? `<div class="reveal-pop">Population ${formatPopulation(r.location.pop)}</div>`
+    : '';
   const card = el(`
     <div class="reveal-card">
       <div class="reveal-score ${cls}">${scoreLine}</div>
       <div class="reveal-detail">${detail}</div>
+      ${popLine}
       <div class="reveal-quip">${esc(quip)}</div>
       <div class="reveal-hint">Drag, pinch or scroll to inspect the answer</div>
       <div class="reveal-actions">

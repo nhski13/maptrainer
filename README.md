@@ -65,7 +65,15 @@ within 25 km of a higher-ranked one are folded away — closer than the scoring
 bullseye is not a separate question.
 
 Regenerate with `node scripts/build-country-packs.mjs` (see the script header
-for the three packages it wants).
+for the three packages it wants), then `node scripts/backfill-populations.mjs`
+to re-add the population column.
+
+Populations are GeoNames' — the city itself, not its metro area. That is the
+figure that stays comparable across 2,800 cities: Paris reads 2.1M next to
+Lyon's 0.5M rather than 13M next to 1.7M, and the reader is never left guessing
+which definition a given line was written to. 2,611 of 2,630 entries resolve;
+the rest carry no figure rather than a guessed one, and the reveal card just
+omits the line.
 
 ## The weak-spot engine
 
@@ -154,7 +162,7 @@ Sentinel-2 detail. **Frame both** and **Zoom to answer** replay either beat.
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # vitest suite (103 tests)
+npm test         # vitest suite (112 tests)
 npm run build    # typecheck + production build
 ```
 
@@ -175,6 +183,9 @@ tile zoom 8, Pro at 10):
 - Each detail patch is seeded from the one it replaces, so crossing a zoom
   band never shows less than what was already on screen, and patches fade out
   on the way back to globe scale rather than being cut.
+- A moving view fetches as it moves — including a tile band beyond the edges a
+  drag is heading for — and re-centres its patch on what it has, rather than
+  waiting for the gesture to end and then discovering it has nothing.
 
 **Vector overlay**: country borders from
 [world-atlas](https://github.com/topojson/world-atlas) at 1:110m, and — inside

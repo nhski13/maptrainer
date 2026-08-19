@@ -219,3 +219,65 @@ describe('patchReuse', () => {
     }
   });
 });
+
+describe('patchReuse alignment', () => {
+  /** Canvas size a plan's patch gets, in pixels. */
+  const size = (p: { cols: number; rows: number }): [number, number] => [p.cols * 256, p.rows * 256];
+
+  it('blits patch to patch at whole pixels and a power-of-two scale', () => {
+    // Every patch is tile-aligned on the same global grid, so carrying one
+    // patch's pixels into the next lands on whole pixels at a power-of-two
+    // scale. That is what lets a patch be seeded from its predecessor over and
+    // over — through a long zoom, or through a drag that re-plans twice a
+    // second — without the imagery going soft from repeated interpolation:
+    // there is no sub-pixel phase for the resampler to smear.
+    //
+    // Whole pixels, not whole tiles. Crossing a tile level halves the source
+    // grid against the destination, so an offset of half a source tile (128 px)
+    // is normal and exact; only within a level is everything a multiple of 256.
+    for (const [lon, lat] of [[-98, 39], [139, 35], [-43, -22], [18, 59]]) {
+      let prev = null as ReturnType<typeof planDetail>;
+      for (let zoom = 2.2; zoom <= 48; zoom *= 1.07) {
+        const scalePx = 338 * zoom;
+        const pxPerDeg = (scalePx * Math.PI) / 180;
+        const plan = planDetail(lon, lat, pxPerDeg, 900 / pxPerDeg, 700 / pxPerDeg);
+        if (!plan) continue;
+        if (prev) {
+          const [pw, ph] = size(prev);
+          const [nw, nh] = size(plan);
+          const r = patchReuse(prev.bounds, pw, ph, plan.bounds, nw, nh);
+          expect(r).not.toBeNull();
+          for (const v of [r!.sx, r!.sy, r!.dx, r!.dy, r!.sw, r!.sh, r!.dw, r!.dh]) {
+            expect(v).toBe(Math.round(v));
+          }
+          // Scale is a power of two: same tile level is 1:1, one level in is 2x.
+          const scaleX = r!.dw / r!.sw;
+          expect(Math.log2(scaleX)).toBeCloseTo(Math.round(Math.log2(scaleX)), 6);
+          expect(r!.dh / r!.sh).toBeCloseTo(scaleX, 6);
+        }
+        prev = plan;
+      }
+    }
+  });
+
+  it('blits on tile boundaries when the view pans, too', () => {
+    // Panning holds the tile level and shifts the rect by whole tiles, so the
+    // carried-over pixels move by whole tiles as well: a pure integer copy.
+    const pxPerDeg = (338 * 8 * Math.PI) / 180;
+    const plan = (lon: number, lat: number) =>
+      planDetail(lon, lat, pxPerDeg, 900 / pxPerDeg, 700 / pxPerDeg)!;
+    let prev = plan(-98, 39);
+    for (let i = 1; i <= 30; i++) {
+      const next = plan(-98 + i * 1.5, 39 + i * 0.8);
+      if (next.z !== prev.z) { prev = next; continue; }
+      const r = patchReuse(prev.bounds, prev.cols * 256, prev.rows * 256,
+                           next.bounds, next.cols * 256, next.rows * 256);
+      if (r) {
+        expect(r.dw).toBeCloseTo(r.sw, 6); // 1:1 — no scaling at all
+        expect(r.dh).toBeCloseTo(r.sh, 6);
+        for (const v of [r.sx, r.sy, r.dx, r.dy]) expect(v % 256).toBeCloseTo(0, 6);
+      }
+      prev = next;
+    }
+  });
+});

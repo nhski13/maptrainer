@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.11.0 — 2026-08-19
+
+- **Dragging no longer flashes either.** 1.10.0 fixed the flash on zoom; the
+  same report was also about scrolling, and that turned out to be a different
+  bug with the same symptom. Two of them, in fact.
+
+  The first: a continuous drag fetched nothing at all. Tiles are only requested
+  once the view holds still, and the settle timer resets on every frame — so
+  for as long as a finger was moving, no imagery was pulled, and every bit of
+  ground the drag uncovered stayed blurry until the finger came off. The view
+  now fetches while it moves, and fetches a tile band *beyond* the edges it is
+  heading for, so the ground arrives before the drag does.
+
+  The second: the patch never re-centred. A cache composite was all-or-nothing
+  — every tile present or nothing applied — so a drag across cold ground kept
+  the old patch pinned where it was and simply walked off the edge of it onto
+  raw base texture. Partial composites are now applied too, seeded from the
+  outgoing patch, which keeps the imagery the view already had underneath it
+  while the missing tiles land.
+
+  Measured the same way as before, on a deliberately brutal drag — a full
+  screen-width per second for two seconds, at 250 ms tile latency — blurry
+  frames went from 57 to 19. What is left is the network, not the renderer.
+- **The patch fade could push past its own endpoints.** `requestAnimationFrame`
+  hands its callback the frame's start time, which can be *earlier* than the
+  timestamp taken when the frame was requested, so the first step of a fade
+  computed a negative progress and drove the shader's mix factor below zero —
+  extrapolating away from the imagery instead of toward it, for one frame,
+  exactly as a patch appeared. Progress is clamped now, on the fades and on the
+  camera animation.
+- **The round score is the headline again.** The reveal card led with the
+  points — 96 × 2 shown as a big "+192" — but the points are a property of the
+  round, not of the tap: a 96 on a ×2 round is the same throw as a 96 on a ×1,
+  and 96 is the number MapTap reports back. The card now leads with the score
+  out of 100 and puts the arithmetic under it, as "× 2 = 192 points".
+- **The reveal card shows how big the place is.** A 60-mile miss on a city of
+  eight million is a different mistake from the same miss on a town of forty
+  thousand, and the card had no way to say so. Populations come from GeoNames
+  (CC BY 4.0) — the city itself, not its metro area, which is the figure that
+  stays comparable across 2,800 of them — via a new
+  `scripts/backfill-populations.mjs`, and are written at two significant
+  figures. 2,611 of 2,630 entries resolved, including every hand-curated one;
+  the nineteen that no gazetteer gives a figure for simply omit the line rather
+  than being guessed at.
+
 ## 1.10.0 — 2026-08-19
 
 - **State lines for the United States.** Interior state boundaries at 1:10m,

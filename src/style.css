@@ -426,7 +426,7 @@ h2 {
   max-width: min(420px, calc(100vw - 20px));
 }
 
-/* score × multiplier, set small beside the points total */
+/* What the multiplier turns the round score into, set small underneath it */
 .reveal-math {
   display: block;
   font-size: 12px;
@@ -510,6 +510,14 @@ h2 {
   color: var(--ink-2);
   font-size: 14px;
   margin: 4px 0 2px;
+}
+
+/* City size, under the distance — context, not a headline */
+.reveal-pop {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 .reveal-quip {
