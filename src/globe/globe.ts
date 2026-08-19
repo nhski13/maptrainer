@@ -22,6 +22,7 @@ import { feature, mesh } from 'topojson-client';
 import type { Topology, GeometryCollection } from 'topojson-specification';
 import worldData from 'world-atlas/countries-110m.json';
 import earthUrl from '../assets/earth.jpg';
+import { stateLines, stateLinesCap } from '../data/state-lines';
 import { formatMiles, haversineKm, type LatLon } from '../core/geo';
 
 const world = worldData as unknown as Topology<{ countries: GeometryCollection }>;
@@ -57,6 +58,13 @@ const ANSWER_ZOOM = 20;
 const REVEAL_FLY_DELAY_MS = 1400;
 /** Pin-drop animation length. */
 const DROP_MS = 520;
+/**
+ * Zoom band over which state lines come up. At 1x the lower 48 is a couple of
+ * hundred pixels wide and forty-nine extra outlines is a smudge; by the time
+ * the view is close enough for a state to mean something, they are fully there.
+ */
+const STATE_LINES_FROM = 1.6;
+const STATE_LINES_FULL = 2.8;
 
 // ── Sentinel-2 detail tiles (same imagery family MapTap serves) ───────
 // EOX s2cloudless, WGS84 grid, CORS-enabled, attribution required.
@@ -83,8 +91,25 @@ const PATCH_PAINT_MS = 130;
 const WARM_ENTRY_LEVELS = 2;
 /** Tile levels the settled view runs ahead by, once you are already zoomed in. */
 const WARM_LOOKAHEAD_LEVELS = 2;
+/** Tiles of headroom fetched beyond the edges a drag is heading for. */
+const DRAG_LEAD_TILES = 1;
 /** Zoom ratio the level sweep steps by — fine enough not to skip a band. */
 const LEVEL_SWEEP_STEP = 1.08;
+/** Length of the patch cross-fade, in and out. */
+const PATCH_FADE_MS = 180;
+
+/**
+ * Progress along an animation, held inside [0, 1].
+ *
+ * The lower clamp is not defensive noise. requestAnimationFrame hands its
+ * callback the *frame's* start time, which can be earlier than the
+ * performance.now() taken when the frame was requested — so the first step of
+ * an animation can compute a negative t. On a rotation that is a hair of
+ * backwards travel nobody sees; on the patch fade it drives the shader's mix
+ * factor below zero, which extrapolates away from the imagery instead of
+ * toward it, and shows up as a one-frame flicker exactly when a patch appears.
+ */
+const clamp01 = (t: number): number => (t < 0 ? 0 : t > 1 ? 1 : t);
 
 // ── WebGL satellite layer ─────────────────────────────────────────────
 
@@ -145,7 +170,7 @@ void main() {
 `;
 
 /** Degree-space bounds of a detail patch. */
-interface PatchBounds {
+export interface PatchBounds {
   lonMin: number; // may extend past ±180 (continuous, unwrapped)
   latMax: number;
   lonSpan: number;
@@ -162,6 +187,7 @@ class SatelliteLayer {
   private uPatchAlpha: WebGLUniformLocation | null = null;
   private patchTex: WebGLTexture | null = null;
   private patchBounds: PatchBounds | null = null;
+  private patchSource: HTMLCanvasElement | null = null;
   patchAlpha = 0;
   ready = false;
   failed = false;
@@ -275,15 +301,28 @@ class SatelliteLayer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     this.patchBounds = bounds;
+    this.patchSource = source;
   }
 
   clearPatch(): void {
     this.patchBounds = null;
+    this.patchSource = null;
     this.patchAlpha = 0;
   }
 
   hasPatch(): boolean {
     return this.patchBounds !== null;
+  }
+
+  /**
+   * The imagery currently on the globe, for seeding the patch that replaces
+   * it. Whatever it holds is real detail at some level, which is more than the
+   * base texture has, so it is worth carrying forward even mid-fade.
+   */
+  currentPatch(): PriorPatch | null {
+    return this.patchSource && this.patchBounds
+      ? { canvas: this.patchSource, bounds: this.patchBounds }
+      : null;
   }
 
   /** All spatial args in device pixels; ty measured from the top. */
@@ -495,6 +534,34 @@ function warmPlan(plan: TileRect): void {
 }
 
 /**
+ * Queue the band of tiles `depth` deep just outside one edge of a rect.
+ * Columns wrap with the grid; rows are clipped, since there is nothing north
+ * of the north pole to fetch.
+ */
+function warmBand(plan: TileRect, dCol: number, dRow: number, depth: number): void {
+  const rect: TileRect =
+    dCol !== 0
+      ? {
+          z: plan.z,
+          colStart: dCol > 0 ? plan.colStart + plan.cols : plan.colStart - depth,
+          rowStart: plan.rowStart,
+          cols: depth,
+          rows: plan.rows,
+        }
+      : {
+          z: plan.z,
+          colStart: plan.colStart,
+          rowStart: dRow > 0 ? plan.rowStart + plan.rows : plan.rowStart - depth,
+          cols: plan.cols,
+          rows: depth,
+        };
+  const top = Math.max(0, rect.rowStart);
+  const bottom = Math.min(2 ** plan.z, rect.rowStart + rect.rows);
+  if (bottom <= top) return;
+  warmPlan({ ...rect, rowStart: top, rows: bottom - top });
+}
+
+/**
  * Choose tile zoom + tile range covering the current view.
  * `pxPerDeg` is on-screen pixel density at globe center; the patch aims to
  * match or exceed it, capped at MAX_TILE_ZOOM (MapTap+ Pro fidelity).
@@ -566,6 +633,60 @@ export function baseCropSlices(lonMin: number, lonSpan: number, w: number): Crop
   return slices;
 }
 
+/** The patch already on the globe — pixels plus the ground they cover. */
+export interface PriorPatch {
+  canvas: HTMLCanvasElement;
+  bounds: PatchBounds;
+}
+
+/** A `drawImage` of one patch into another: source rect → destination rect. */
+export interface PatchReuse {
+  sx: number;
+  sy: number;
+  sw: number;
+  sh: number;
+  dx: number;
+  dy: number;
+  dw: number;
+  dh: number;
+}
+
+/**
+ * Where an existing patch's pixels land inside a new one, or null if the two
+ * cover no common ground. Both are plate-carree over their own bounds, so this
+ * is a plain rectangle mapping; the one subtlety is longitude, which each
+ * patch carries unwrapped in its own turn around the globe — a patch at 190E
+ * and a patch at -170E are over the same water — so the ranges have to be
+ * brought into a common turn before they can be compared.
+ */
+export function patchReuse(
+  prev: PatchBounds,
+  prevW: number,
+  prevH: number,
+  next: PatchBounds,
+  nextW: number,
+  nextH: number,
+): PatchReuse | null {
+  const turns = Math.round((next.lonMin - prev.lonMin) / 360);
+  const prevLonMin = prev.lonMin + turns * 360;
+  const lonA = Math.max(prevLonMin, next.lonMin);
+  const lonB = Math.min(prevLonMin + prev.lonSpan, next.lonMin + next.lonSpan);
+  if (lonB - lonA <= 0) return null;
+  const latTop = Math.min(prev.latMax, next.latMax);
+  const latBot = Math.max(prev.latMax - prev.latSpan, next.latMax - next.latSpan);
+  if (latTop - latBot <= 0) return null;
+  return {
+    sx: ((lonA - prevLonMin) / prev.lonSpan) * prevW,
+    sy: ((prev.latMax - latTop) / prev.latSpan) * prevH,
+    sw: ((lonB - lonA) / prev.lonSpan) * prevW,
+    sh: ((latTop - latBot) / prev.latSpan) * prevH,
+    dx: ((lonA - next.lonMin) / next.lonSpan) * nextW,
+    dy: ((next.latMax - latTop) / next.latSpan) * nextH,
+    dw: ((lonB - lonA) / next.lonSpan) * nextW,
+    dh: ((latTop - latBot) / next.latSpan) * nextH,
+  };
+}
+
 /**
  * Paint the patch's own region of the blurry base texture, upscaled, as the
  * canvas's starting content. Tiles then land on top of it. That is what makes
@@ -593,9 +714,23 @@ function drawBaseCrop(
   }
 }
 
+/**
+ * A patch canvas to build into, pre-filled with the best imagery already on
+ * hand: the blurry base crop everywhere, and on top of it whatever the patch
+ * currently on the globe covers of the same ground.
+ *
+ * That second layer is what stops a zoom from flashing. A new patch takes a
+ * moment to fetch, and until this it started life as nothing but the upscaled
+ * base texture — so crossing a zoom band threw away the sharp imagery already
+ * on screen, showed blur for as long as the tiles took, then snapped back to
+ * sharp. Seeded from its predecessor, the worst a half-loaded patch can look
+ * is exactly what it replaced, and every tile that lands is an improvement on
+ * it rather than a recovery from a step backwards.
+ */
 function newPatchCanvas(
   plan: DetailPlan,
   base: HTMLImageElement | null,
+  prior: PriorPatch | null,
 ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement('canvas');
   canvas.width = plan.cols * TILE_PX;
@@ -603,30 +738,57 @@ function newPatchCanvas(
   const ctx = canvas.getContext('2d')!;
   ctx.imageSmoothingQuality = 'high';
   drawBaseCrop(ctx, base, plan.bounds, canvas.width, canvas.height);
+  if (prior) {
+    const r = patchReuse(
+      prior.bounds,
+      prior.canvas.width,
+      prior.canvas.height,
+      plan.bounds,
+      canvas.width,
+      canvas.height,
+    );
+    if (r) ctx.drawImage(prior.canvas, r.sx, r.sy, r.sw, r.sh, r.dx, r.dy, r.dw, r.dh);
+  }
   return { canvas, ctx };
 }
 
+/** A patch built without touching the network, and how much of it is tiles. */
+export interface CachedComposite {
+  canvas: HTMLCanvasElement;
+  /** True when every tile the plan wants was in cache. */
+  complete: boolean;
+}
+
 /**
- * Composite a plan from cache alone, or return null if any tile is missing.
- * This is the path a warmed zoom takes: no network, no settle wait, no fade —
- * the sharp version is simply there on the next frame.
+ * Composite as much of a plan as cache and the outgoing patch can supply,
+ * without going to the network. Returns null only when that would amount to
+ * nothing but the blurry base — a patch with no content is not worth uploading.
+ *
+ * Partial results matter as much as complete ones, and for a different reason.
+ * A complete one is the warmed zoom: the sharp version is simply there on the
+ * next frame, no settle wait, no fade. A partial one is what keeps a *drag*
+ * from flashing — the patch has to re-centre on where the view is going, or
+ * the view walks off the edge of it and onto raw base texture. Seeded from the
+ * patch it replaces, a re-centred partial shows the same imagery in the ground
+ * they share, and blur only where the drag has exposed something neither of
+ * them has yet.
  */
 function compositeCached(
   plan: DetailPlan,
   base: HTMLImageElement | null,
-): HTMLCanvasElement | null {
+  prior: PriorPatch | null,
+): CachedComposite | null {
   const have: { img: HTMLImageElement; cx: number; ry: number }[] = [];
-  let complete = true;
+  let total = 0;
   eachTile(plan, (row, col, ry, cx) => {
-    if (!complete) return;
+    total++;
     const img = cacheGet(tileKey(plan.z, row, col));
     if (img) have.push({ img, cx, ry });
-    else complete = false;
   });
-  if (!complete) return null;
-  const { canvas, ctx } = newPatchCanvas(plan, base);
+  if (have.length === 0 && !prior) return null;
+  const { canvas, ctx } = newPatchCanvas(plan, base, prior);
   for (const t of have) ctx.drawImage(t.img, t.cx * TILE_PX, t.ry * TILE_PX);
-  return canvas;
+  return { canvas, complete: have.length === total };
 }
 
 /**
@@ -637,9 +799,10 @@ function compositeCached(
 async function buildPatch(
   plan: DetailPlan,
   base: HTMLImageElement | null,
+  prior: PriorPatch | null,
   onProgress?: (canvas: HTMLCanvasElement) => void,
 ): Promise<HTMLCanvasElement> {
-  const { canvas, ctx } = newPatchCanvas(plan, base);
+  const { canvas, ctx } = newPatchCanvas(plan, base, prior);
   let landed = 0;
   const jobs: Promise<void>[] = [];
   eachTile(plan, (row, col, ry, cx) => {
@@ -650,7 +813,7 @@ async function buildPatch(
           landed++;
           onProgress?.(canvas);
         })
-        .catch(() => undefined), // leave the base crop showing for this tile
+        .catch(() => undefined), // leave whatever was already there showing
     );
   });
   await Promise.all(jobs);
@@ -683,11 +846,16 @@ export class Globe {
   private dropStart = 0;
   private dropRaf = 0;
   private detailToken = 0;
+  /** The plan whose patch is fully on screen — every tile of it landed. */
   private appliedDetailKey = '';
+  /** The plan last composited at all, complete or partial. */
+  private appliedPatchKey = '';
   private fadeRaf = 0;
+  private patchFading = false;
   private warmedAheadKey = '';
   private warmedViewKey = '';
   private lastCachedApply = 0;
+  private lastPlanCentre: [number, number] | null = null;
 
   constructor(
     private container: HTMLElement,
@@ -1005,7 +1173,7 @@ export class Globe {
     const t0 = performance.now();
     const dur = 650;
     const step = (now: number): void => {
-      const t = Math.min(1, (now - t0) / dur);
+      const t = clamp01((now - t0) / dur);
       const e = 1 - Math.pow(1 - t, 3); // ease-out cubic
       this.rotation = [start[0] + dLon * e, start[1] + dLat * e];
       this.zoom = zoomFrom * Math.exp(zoomRatio * e);
@@ -1106,6 +1274,37 @@ export class Globe {
     });
   }
 
+  /**
+   * Fetch for a view that is still moving: the tiles this plan wants, and a
+   * band beyond the edges the movement is heading for.
+   *
+   * Both halves matter. The settle path is otherwise the only thing that
+   * fetches, and a continuous drag never lets it fire — the timer resets on
+   * every frame — so a two-second drag used to pull no imagery at all, and
+   * every bit of ground it uncovered stayed blurry until the finger came off.
+   * But fetching the plan alone is still a beat late: by the time a tile row
+   * enters the plan it is already under the finger, and it lands a round trip
+   * after that. The lead band goes out while it is still off-screen, so it is
+   * in cache by the time the drag reaches it.
+   *
+   * Idempotent — anything cached, in flight or already queued falls straight
+   * back out — so calling it on every plan change costs a set lookup per tile.
+   */
+  private warmDrag(plan: DetailPlan): void {
+    if (!warmingAllowed()) return;
+    warmPlan(plan);
+    const centre: [number, number] = [-this.rotation[0], -this.rotation[1]];
+    const prev = this.lastPlanCentre;
+    this.lastPlanCentre = centre;
+    if (!prev) return;
+    const dLon = ((centre[0] - prev[0] + 540) % 360) - 180;
+    const dLat = centre[1] - prev[1];
+    // Rows are numbered southward from the pole, so a drag toward higher
+    // latitudes is heading for lower row numbers.
+    if (dLon !== 0) warmBand(plan, Math.sign(dLon), 0, DRAG_LEAD_TILES);
+    if (dLat !== 0) warmBand(plan, 0, -Math.sign(dLat), DRAG_LEAD_TILES);
+  }
+
   /** Queue the band below the one on screen, so the next pinch is paid for. */
   private warmAhead(): void {
     if (!warmingAllowed()) return;
@@ -1148,13 +1347,26 @@ export class Globe {
   }
 
   /**
-   * Swap in a patch that can be built from cache alone. Runs on every render
-   * request, guarded by a short floor so a continuous pinch doesn't re-upload
-   * a 2048² texture every frame.
+   * Re-point the detail patch at where the view is now, using cache and the
+   * outgoing patch only. Runs on every render request, guarded by a short
+   * floor so a continuous pinch doesn't re-upload a 2048² texture every frame,
+   * and by the plan key so a view that hasn't moved between bands does no work
+   * at all.
+   *
+   * A complete result is the end of it: the plan is marked applied and the
+   * settle path has nothing left to fetch. A partial one is applied too — it
+   * carries the outgoing patch's pixels onto the ground the view is moving
+   * into, which is what stops a drag from walking off the edge of its own
+   * patch — but the plan is left unmarked so the settle still goes and gets
+   * the tiles that are actually missing.
    */
   private applyCachedDetail(): void {
     if (!this.sat.ready || this.sat.failed) return;
     if (this.zoom < DETAIL_ZOOM_THRESHOLD) return;
+    // Zoomed back in while the patch was on its way out — catch it and bring
+    // it back up rather than letting the fade run to the drop it was heading
+    // for, which would blur the globe under a view that wants detail again.
+    if (this.patchFading) this.fadePatchIn();
     const now = performance.now();
     if (now - this.lastCachedApply < CACHED_APPLY_MS) return;
     // Charge the throttle for the attempt, not just the hit: a drag fires this
@@ -1164,12 +1376,14 @@ export class Globe {
     const plan = this.planFor(-this.rotation[0], -this.rotation[1], this.zoom);
     if (!plan) return;
     const key = planKey(plan);
-    if (key === this.appliedDetailKey) return;
-    const canvas = compositeCached(plan, this.sat.baseImage);
-    if (!canvas) return;
+    if (key === this.appliedPatchKey) return;
+    this.warmDrag(plan);
+    const built = compositeCached(plan, this.sat.baseImage, this.sat.currentPatch());
+    if (!built) return;
     this.detailToken++; // any in-flight build is for a view we've moved past
-    this.sat.setPatch(canvas, plan.bounds);
-    this.appliedDetailKey = key;
+    this.sat.setPatch(built.canvas, plan.bounds);
+    this.appliedPatchKey = key;
+    this.appliedDetailKey = built.complete ? key : '';
     // Refining a patch that's already up should not flicker through a fade;
     // only the first patch of a zoom-in gets one.
     if (this.sat.patchAlpha === 0) this.fadePatchIn();
@@ -1180,11 +1394,7 @@ export class Globe {
   private updateDetail(): void {
     if (!this.sat.ready || this.sat.failed) return;
     if (this.zoom < DETAIL_ZOOM_THRESHOLD) {
-      if (this.sat.hasPatch()) {
-        this.sat.clearPatch();
-        this.appliedDetailKey = '';
-        this.requestRenderOnly();
-      }
+      if (this.sat.hasPatch() && !this.patchFading) this.fadePatchOut();
       // Idle at globe scale: line up the first zoom step for wherever the
       // view is now pointing.
       this.warmView();
@@ -1197,7 +1407,7 @@ export class Globe {
     if (key === this.appliedDetailKey) return; // already showing this patch
     const token = ++this.detailToken;
     let lastPaint = 0;
-    void buildPatch(plan, this.sat.baseImage, (canvas) => {
+    void buildPatch(plan, this.sat.baseImage, this.sat.currentPatch(), (canvas) => {
       // Show the patch filling in rather than holding everything back until
       // the slowest tile of the batch arrives — throttled, since each paint
       // is a texture upload.
@@ -1213,6 +1423,7 @@ export class Globe {
         if (token !== this.detailToken) return; // stale — view moved on
         this.sat.setPatch(canvas, plan.bounds);
         this.appliedDetailKey = key;
+        this.appliedPatchKey = key;
         this.fadePatchIn();
       })
       .catch(() => {
@@ -1223,13 +1434,41 @@ export class Globe {
   /** Fade the freshly-loaded patch in over ~180 ms. */
   private fadePatchIn(): void {
     cancelAnimationFrame(this.fadeRaf);
+    this.patchFading = false;
     const t0 = performance.now();
     const from = this.sat.patchAlpha;
     const step = (now: number): void => {
-      const t = Math.min(1, (now - t0) / 180);
+      const t = clamp01((now - t0) / PATCH_FADE_MS);
       this.sat.patchAlpha = from + (1 - from) * t;
       this.requestRenderOnly();
       if (t < 1) this.fadeRaf = requestAnimationFrame(step);
+    };
+    this.fadeRaf = requestAnimationFrame(step);
+  }
+
+  /**
+   * Fade the patch out on the way back to globe scale, and only drop it once
+   * it is invisible. Clearing it the instant the zoom crossed the threshold
+   * was a hard cut from sharp imagery to blurry — the fade-in's own flash,
+   * played backwards.
+   */
+  private fadePatchOut(): void {
+    cancelAnimationFrame(this.fadeRaf);
+    this.patchFading = true;
+    const t0 = performance.now();
+    const from = this.sat.patchAlpha;
+    const step = (now: number): void => {
+      const t = clamp01((now - t0) / PATCH_FADE_MS);
+      this.sat.patchAlpha = from * (1 - t);
+      this.requestRenderOnly();
+      if (t < 1) {
+        this.fadeRaf = requestAnimationFrame(step);
+        return;
+      }
+      this.patchFading = false;
+      this.sat.clearPatch();
+      this.appliedDetailKey = '';
+      this.appliedPatchKey = '';
     };
     this.fadeRaf = requestAnimationFrame(step);
   }
@@ -1277,6 +1516,7 @@ export class Globe {
       ctx.strokeStyle = c('--border-sat', 'rgba(255,255,255,0.45)');
       ctx.lineWidth = 0.9;
       ctx.stroke();
+      this.drawStateLines(path, c('--state-sat', 'rgba(255,255,255,0.3)'), 0.7);
     } else {
       // flat vector fallback (texture loading, or no WebGL)
       ctx.beginPath();
@@ -1300,6 +1540,7 @@ export class Globe {
       ctx.strokeStyle = c('--border', 'rgba(165,205,240,0.5)');
       ctx.lineWidth = 0.8;
       ctx.stroke();
+      this.drawStateLines(path, c('--state', 'rgba(165,205,240,0.34)'), 0.6);
     }
 
     // globe rim
@@ -1312,6 +1553,37 @@ export class Globe {
     if (this.markers.length > 0) this.renderMarkers();
     if (this.reveal) this.renderReveal(path);
     else if (this.pin) this.drawMarker(this.pin, c('--pin', '#ffb545'));
+  }
+
+  /**
+   * US state lines, thinner and dimmer than the national borders they sit
+   * inside, and faded in with zoom so they arrive as the view gets close
+   * enough for a state boundary to be worth telling apart from a country's.
+   *
+   * The path is skipped outright when the lower 48 cannot be on the near
+   * hemisphere at all — nine frames in ten of a globe being dragged around
+   * Eurasia, and the mesh is the most detailed vector the app draws.
+   */
+  private drawStateLines(
+    path: ReturnType<typeof geoPath>,
+    color: string,
+    lineWidth: number,
+  ): void {
+    const span = STATE_LINES_FULL - STATE_LINES_FROM;
+    const alpha = Math.min(1, (this.zoom - STATE_LINES_FROM) / span);
+    if (alpha <= 0) return;
+    const centre: [number, number] = [-this.rotation[0], -this.rotation[1]];
+    if (geoDistance(stateLinesCap.center, centre) > stateLinesCap.radius + Math.PI / 2) return;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    path(stateLines);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+    ctx.restore();
   }
 
   /**

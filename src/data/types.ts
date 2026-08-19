@@ -23,4 +23,10 @@ export interface Location {
   tier: Tier;
   continent: Continent;
   tags: Tag[];
+  /**
+   * City population, from GeoNames — the city itself, not its metro area.
+   * Optional because a handful of the remoter entries have no figure in any
+   * gazetteer, and a made-up number would be worse than a missing one.
+   */
+  pop?: number;
 }

@@ -18,6 +18,8 @@
   --land: #22384f;
   --border: rgba(165, 205, 240, 0.5);
   --border-sat: rgba(255, 255, 255, 0.45);
+  --state: rgba(165, 205, 240, 0.34);
+  --state-sat: rgba(255, 255, 255, 0.3);
   --graticule: rgba(255, 255, 255, 0.05);
   --rim: rgba(120, 170, 255, 0.35);
   --pin: #ffb545;
@@ -424,7 +426,7 @@ h2 {
   max-width: min(420px, calc(100vw - 20px));
 }
 
-/* score × multiplier, set small beside the points total */
+/* What the multiplier turns the round score into, set small underneath it */
 .reveal-math {
   display: block;
   font-size: 12px;
@@ -508,6 +510,14 @@ h2 {
   color: var(--ink-2);
   font-size: 14px;
   margin: 4px 0 2px;
+}
+
+/* City size, under the distance — context, not a headline */
+.reveal-pop {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 .reveal-quip {
